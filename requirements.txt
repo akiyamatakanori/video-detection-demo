@@ -1,0 +1,38 @@
+# ============================================================
+# requirements.txt — Video Intelligence Terminal
+# ============================================================
+# インストール: pip install -r requirements.txt
+# Apple Silicon (M4 Pro): torch は MPS バックエンドを自動利用します
+# ============================================================
+
+# ── Streamlit ──────────────────────────────────────────────
+streamlit>=1.35.0
+
+# ── 画像・動画処理 ─────────────────────────────────────────
+opencv-python-headless>=4.9.0
+Pillow>=10.0.0
+numpy>=1.26.0
+
+# ── HTTP クライアント ──────────────────────────────────────
+requests>=2.31.0
+
+# ── 環境変数 ─────────────────────────────────────────────
+python-dotenv>=1.0.0
+
+# ── YouTube / ストリーム取得 ──────────────────────────────
+yt-dlp>=2024.1.0
+
+# ── RT-DETR / RT-DETRv2 物体検知（ローカル推論）─────────────
+# Apple Silicon: torch は MPS 対応ビルドを自動インストール
+# GPU 環境: torch+cu121 等を適宜指定してください
+torch>=2.2.0
+torchvision>=0.17.0
+transformers>=4.40.0       # RTDetrForObjectDetection が含まれるバージョン
+accelerate>=0.28.0
+
+# ── HuggingFace 無料モデル API ────────────────────────────
+huggingface-hub>=0.22.0
+
+# ── (オプション) HTTPS 起動用 ────────────────────────────
+# Streamlit を HTTPS で起動する場合は .env に SSL_CERT_FILE / SSL_KEY_FILE を設定
+# 追加ライブラリ不要（Streamlit 組み込み対応）

@@ -1,0 +1,49 @@
+# ============================================================
+# .gitignore — Video Intelligence Terminal
+# ============================================================
+
+# !! APIキー・秘密情報 !!
+.env
+
+# SSL証明書（秘密鍵を含むため絶対にコミットしない）
+certs/
+
+# Python キャッシュ
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+
+# 仮想環境
+.venv/
+venv/
+env/
+.conda/
+
+# ダウンロード動画（大容量ファイルは Git 管理しない）
+downloads/
+*.mp4
+*.webm
+*.mkv
+*.mov
+*.avi
+*.m4v
+*.ts
+
+# Streamlit キャッシュ
+.streamlit/
+
+# OS 生成ファイル
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+
+# IDE
+.vscode/
+.idea/
+*.code-workspace
+
+# ログ
+*.log
+logs/
