@@ -6,11 +6,11 @@ NVIDIA NIM APIとのハイブリッド動作対応。
 <img width="1817" height="782" alt="image" src="https://github.com/user-attachments/assets/7c9c9f4b-33af-4a0a-b883-0768ed90808b" />
 
 ---
-LIVE DETECTION: ライブストリーム映像のVLM物体検出と自然言語による説明
-VIDEO SEARCH: LLMによるアノテーション（タグ）の検索
-SUMMARIZATION: LLMによる要約作成
-HIGHLIGHTS: ハイライトの抽出
-ANALYSIS LOG: フレーム分割したログ履歴
+- LIVE DETECTION: ライブストリーム映像のVLM物体検出と自然言語による説明
+- VIDEO SEARCH: LLMによるアノテーション（タグ）の検索
+- SUMMARIZATION: LLMによる要約作成
+- HIGHLIGHTS: ハイライトの抽出
+- ANALYSIS LOG: フレーム分割したログ履歴
 
 
 ## 構成
