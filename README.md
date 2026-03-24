@@ -98,6 +98,39 @@ video-detection-demo/
 
 ---
 
+## パフォーマンスチューニング
+
+### 速度に関係するパラメータ（サイドバーで調整）
+
+| パラメータ | 場所 | 役割 | 速くするには |
+|---|---|---|---|
+| **VLM Interval (s)** | Analysis Settings | 次フレームを送るまでの待機時間 | 推論時間に合わせて設定 |
+| **Max Tokens** | Analysis Settings | 1回の出力文字数上限 | **200〜300に下げる**（最も効果大） |
+| **Image Resize (%)** | Analysis Settings | VLMに送る画像サイズ | **50〜60%に下げる** |
+| **Top-k** | Generation Parameters | 生成トークンの絞り込み | 10〜20に下げると若干速くなる |
+
+### 重要な仕組み
+
+実際の分析間隔は以下の式で決まります。
+
+```
+実際の分析間隔 = max(VLM Interval, 推論時間)
+```
+
+VLM Interval を短くしても、前の推論が終わるまで次のフレームは送られません。  
+**ステータスバーの LATENCY 値**が現在の推論時間の目安です。
+
+### 環境別推奨設定
+
+| パラメータ | MacBook M4（デフォルト） | 高性能GPUサーバー |
+|---|---|---|
+| VLM Interval (s) | 10〜15 | 3〜5 |
+| Max Tokens | 200〜300 | 600 |
+| Image Resize (%) | 50〜60 | 80〜100 |
+| Thinking Mode | OFF | ON可 |
+
+---
+
 ## 注意事項
 
 - `.env` はGitに含まれません（APIキーを保護）
