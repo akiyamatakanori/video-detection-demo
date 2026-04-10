@@ -533,31 +533,38 @@ div[data-testid="stTabs"] button[aria-selected="true"] {
     border-bottom: 1px solid #0a2a3e; text-transform: uppercase;
 }
 
-/* GPU ON/OFF ボタン */
-.gpu-btn-wrap {
-    display: flex; flex-direction: column; align-items: flex-end;
-    gap: 6px; padding-top: 8px;
+/* GPU ステータス表示バッジ */
+.gpu-status-on {
+    background: linear-gradient(135deg, #002a18 0%, #004a28 100%);
+    border: 2px solid #00e57a; border-radius: 3px;
+    padding: 10px 14px; text-align: center;
+    font-family: 'Orbitron', monospace; font-size: 0.82rem;
+    font-weight: 900; letter-spacing: 0.14em; color: #00e57a;
+    box-shadow: 0 0 14px rgba(0,229,122,0.25), inset 0 0 20px rgba(0,229,122,0.05);
+    text-shadow: 0 0 8px rgba(0,229,122,0.6);
 }
-.gpu-btn-label {
-    font-family: 'Orbitron', monospace; font-size: 0.6rem;
-    color: #2a6a88; letter-spacing: 0.15em; text-transform: uppercase;
+.gpu-status-off {
+    background: linear-gradient(135deg, #080e1a 0%, #0e1c30 100%);
+    border: 2px solid #1e4a6a; border-radius: 3px;
+    padding: 10px 14px; text-align: center;
+    font-family: 'Orbitron', monospace; font-size: 0.82rem;
+    font-weight: 700; letter-spacing: 0.14em; color: #2a7a9a;
 }
-/* ON 状態（緑） */
-button[data-testid="gpu_on_btn"] {
-    background: linear-gradient(135deg, #003a20, #005a30) !important;
-    border: 2px solid #00e57a !important; color: #00e57a !important;
-    font-family: 'Orbitron', monospace !important; font-size: 0.78rem !important;
-    font-weight: 900 !important; letter-spacing: 0.12em !important;
-    border-radius: 3px !important; padding: 8px 18px !important;
-    box-shadow: 0 0 12px rgba(0,229,122,0.3) !important;
+.gpu-switch-hint {
+    font-family: 'Share Tech Mono', monospace; font-size: 0.58rem;
+    text-align: center; margin-top: 4px; letter-spacing: 0.08em;
 }
-/* OFF 状態（グレーブルー） */
-button[data-testid="gpu_off_btn"] {
-    background: #0a1a2e !important;
-    border: 2px solid #1a4a6a !important; color: #2a7a9a !important;
-    font-family: 'Orbitron', monospace !important; font-size: 0.78rem !important;
-    font-weight: 700 !important; letter-spacing: 0.12em !important;
-    border-radius: 3px !important; padding: 8px 18px !important;
+/* 切替ボタン（小型・ダーク） */
+div[data-testid="column"]:last-child div[data-testid="stButton"] > button {
+    background: #020f1f !important; border: 1px solid #0a3055 !important;
+    color: #2a6a88 !important; font-family: 'Share Tech Mono', monospace !important;
+    font-size: 0.64rem !important; letter-spacing: 0.1em !important;
+    padding: 4px 8px !important; border-radius: 2px !important;
+    text-transform: uppercase !important;
+}
+div[data-testid="column"]:last-child div[data-testid="stButton"] > button:hover {
+    border-color: #00b4d8 !important; color: #00d4f5 !important;
+    background: #0a2a40 !important;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -616,41 +623,36 @@ with header_col:
 
 with mode_col:
     st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
-    st.markdown("<div class='gpu-btn-label'>⚡ COMPUTE MODE</div>", unsafe_allow_html=True)
+    st.markdown(
+        "<div style='font-family:Orbitron,monospace;font-size:0.6rem;"
+        "color:#2a6a88;letter-spacing:0.15em;text-transform:uppercase;"
+        "margin-bottom:6px;'>⚡ COMPUTE MODE</div>",
+        unsafe_allow_html=True,
+    )
 
-    # ── GPU ON/OFF トグルボタン（UI左上部に配置） ──
+    # ── GPU ステータスバッジ（Markdownで表示 → CSSが確実に効く）──
     if st.session_state.use_gpu:
-        # GPU ON 状態 → ボタンを押すと CPU へ
-        if st.button(
-            "⚡ GPU  ON",
-            key="gpu_toggle_btn",
-            help="クリックすると CPU モードへ切り替え",
-            use_container_width=True,
-        ):
+        st.markdown(
+            "<div class='gpu-status-on'>⚡ GPU &nbsp; ON</div>"
+            "<div class='gpu-switch-hint' style='color:#00e57a66;'>"
+            "H100 ACTIVE &nbsp;▼ click to switch</div>",
+            unsafe_allow_html=True,
+        )
+        if st.button("→ CPU に切替", key="gpu_toggle_btn", use_container_width=True):
             st.session_state.use_gpu = False
             st.cache_resource.clear()
             st.rerun()
+    else:
         st.markdown(
-            "<div style='font-family:Share Tech Mono,monospace;font-size:0.6rem;"
-            "color:#00e57a;text-align:center;margin-top:2px;'>H100 ACTIVE</div>",
+            "<div class='gpu-status-off'>💻 GPU &nbsp; OFF</div>"
+            "<div class='gpu-switch-hint' style='color:#2a7a9a66;'>"
+            "CPU MODE &nbsp;▼ click to switch</div>",
             unsafe_allow_html=True,
         )
-    else:
-        # GPU OFF 状態 → ボタンを押すと GPU へ
-        if st.button(
-            "💻 GPU  OFF",
-            key="gpu_toggle_btn",
-            help="クリックすると GPU モードへ切り替え",
-            use_container_width=True,
-        ):
+        if st.button("→ GPU に切替", key="gpu_toggle_btn", use_container_width=True):
             st.session_state.use_gpu = True
             st.cache_resource.clear()
             st.rerun()
-        st.markdown(
-            "<div style='font-family:Share Tech Mono,monospace;font-size:0.6rem;"
-            "color:#2a7a9a;text-align:center;margin-top:2px;'>CPU MODE</div>",
-            unsafe_allow_html=True,
-        )
 
 # ── CPU/GPU バナー表示 ──
 _mode_str = "GPU" if st.session_state.use_gpu else "CPU"
