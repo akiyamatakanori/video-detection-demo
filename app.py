@@ -4,58 +4,46 @@ Video Intelligence Terminal
 リアルタイム物体検知 (RT-DETR / RT-DETRv2) と AI 日本語状況説明を並列処理するアプリ
 
 主な機能:
+- CPU / GPU 切り替えラジオボタン（UI左上）
 - RT-DETR v1 / RT-DETRv2 を個別ON/OFFで選択してローカル物体検知（バウンディングボックス表示）
+- Ollama VLM 推論 → GPU サーバー (192.168.11.111:11434) を使用
 - NVIDIA NIM Vision API / HuggingFace 無料モデルによる日本語状況説明（並列処理）
 - YouTube 動画 / ライブ配信 / ローカルフォルダ のファイル解析対応
-- 社内プロキシ環境対応: SSL 検証を全 import より前に無効化（transformers/huggingface_hub 対応）
+- 社内プロキシ環境対応: SSL 検証を全 import より前に無効化
 - 受付大画面向け 24/365 常時表示対応
 """
 
 # ─────────────────────────────────────────────
 # 【最優先】社内プロキシ SSL 対策
-# 環境変数だけでは効かない場合に備え requests.Session 自体をモンキーパッチして
-# 全 HTTP 通信を強制 verify=False にする。
 # ─────────────────────────────────────────────
 import os, ssl
 
-# 環境変数による無効化（一部ライブラリはこれを参照）
 os.environ["HF_HUB_DISABLE_SSL_VERIFICATION"] = "1"
-os.environ["HF_DATASETS_OFFLINE"]              = "1"
+os.environ["HF_DATASETS_OFFLINE"] = "1"
 
-# RT-DETRモデルキャッシュ確認 → キャッシュあり: オフライン / なし: ロードをスキップ
-_v1_cache     = os.path.expanduser("~/.cache/huggingface/hub/models--PekingU--rtdetr_r50vd")
-_v2_cache     = os.path.expanduser("~/.cache/huggingface/hub/models--PekingU--rtdetr_v2_r50vd")
-_qwen2vl_cache = os.path.expanduser("~/.cache/huggingface/hub/models--Qwen--Qwen2-VL-7B-Instruct")
-_RTDETR_CACHED  = os.path.isdir(_v1_cache) and os.path.isdir(_v2_cache)
-_QWEN2VL_CACHED = os.path.isdir(_qwen2vl_cache)
-# TRANSFORMERS_OFFLINE は使用しない
-# → local_files_only=True を from_pretrained に直接渡してキャッシュのみ参照する
-os.environ["CURL_CA_BUNDLE"]                  = ""
-os.environ["REQUESTS_CA_BUNDLE"]              = ""
-os.environ["PYTHONHTTPSVERIFY"]               = "0"
+_v1_cache = os.path.expanduser("~/.cache/huggingface/hub/models--PekingU--rtdetr_r50vd")
+_v2_cache = os.path.expanduser("~/.cache/huggingface/hub/models--PekingU--rtdetr_v2_r50vd")
+_RTDETR_CACHED = os.path.isdir(_v1_cache) and os.path.isdir(_v2_cache)
 
-# Python ssl モジュールのデフォルト検証を無効化
+os.environ["CURL_CA_BUNDLE"] = ""
+os.environ["REQUESTS_CA_BUNDLE"] = ""
+os.environ["PYTHONHTTPSVERIFY"] = "0"
+
 ssl._create_default_https_context = ssl._create_unverified_context
 
-# urllib3 警告抑制
 import urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-# ── requests.Session をモンキーパッチ ──────────────────────────
-# transformers / huggingface_hub が内部で生成する Session も含め
-# 全ての verify= 引数を強制的に False に上書きする。
-import requests
-_OrigSession = requests.Session
+import requests as _req_mod
+_OrigSession = _req_mod.Session
 
 class _NoVerifySession(_OrigSession):
-    """全リクエストで SSL 検証を強制無効化するセッション（社内プロキシ対応）"""
     def request(self, method, url, **kwargs):
         kwargs["verify"] = False
         return super().request(method, url, **kwargs)
 
-requests.Session = _NoVerifySession
+_req_mod.Session = _NoVerifySession
 
-# huggingface_hub が既にインポート済みの場合に備えセッションを差し替え
 try:
     import huggingface_hub.utils._http as _hf_http
     if hasattr(_hf_http, "get_session"):
@@ -64,7 +52,7 @@ except Exception:
     pass
 
 # ─────────────────────────────────────────────
-# 通常 import（SSL 無効化済みの後）
+# 通常 import
 # ─────────────────────────────────────────────
 import streamlit as st
 import cv2
@@ -126,16 +114,36 @@ HF_TOKEN        = os.getenv("HF_TOKEN", "")
 NIM_BASE_URL    = os.getenv("NIM_BASE_URL", "https://integrate.api.nvidia.com/v1")
 DOWNLOAD_DIR    = os.getenv("DOWNLOAD_DIR", str(Path(__file__).parent / "downloads"))
 DEFAULT_FOLDER  = os.getenv("DEFAULT_VIDEO_FOLDER", DOWNLOAD_DIR)
-SSL_CERT        = os.getenv("SSL_CERT_FILE", "")
-SSL_KEY         = os.getenv("SSL_KEY_FILE", "")
-# 社内 CA バンドルがある場合は REQUESTS_CA_BUNDLE に設定すると正規検証も可能
-_ca_bundle      = os.getenv("REQUESTS_CA_BUNDLE", "")
-SSL_VERIFY      = _ca_bundle if _ca_bundle else False
+
+# ── Ollama エンドポイント ──────────────────────────────────────────────────
+# GPU サーバー: 192.168.11.111:11434
+# ローカル CPU: localhost:11434
+OLLAMA_GPU_URL  = "http://192.168.11.111:11434"
+OLLAMA_CPU_URL  = "http://localhost:11434"
+
+_ca_bundle = os.getenv("REQUESTS_CA_BUNDLE", "")
+SSL_VERIFY  = _ca_bundle if _ca_bundle else False
 
 Path(DOWNLOAD_DIR).mkdir(parents=True, exist_ok=True)
 
 # ─────────────────────────────────────────────
-# NVIDIA NIM ビジョンモデル
+# GPU / CPU デバイス判定ユーティリティ
+# ─────────────────────────────────────────────
+def get_compute_device(prefer_gpu: bool) -> str:
+    """
+    prefer_gpu=True  → CUDA があれば cuda、なければ cpu
+    prefer_gpu=False → 強制的に cpu
+    """
+    if prefer_gpu and DETECTION_AVAILABLE:
+        if torch.cuda.is_available():
+            return "cuda"
+    return "cpu"
+
+def get_ollama_url(prefer_gpu: bool) -> str:
+    return OLLAMA_GPU_URL if prefer_gpu else OLLAMA_CPU_URL
+
+# ─────────────────────────────────────────────
+# モデル定義
 # ─────────────────────────────────────────────
 NIM_VISION_MODELS = {
     "Llama 3.2 11B Vision": {
@@ -182,7 +190,6 @@ NIM_VISION_MODELS = {
     },
 }
 
-# HuggingFace 無料ビジョンモデル（NIM 代替）
 HF_VISION_MODELS = {
     "HF: Qwen2-VL 7B (Free)": {
         "id": "Qwen/Qwen2-VL-7B-Instruct",
@@ -204,36 +211,65 @@ HF_VISION_MODELS = {
     },
 }
 
-# ローカル推論モデル（HuggingFace からダウンロード済み・完全オフライン動作）
+# ローカル Ollama ビジョンモデル（GPUサーバーに搭載済みモデルを反映）
 LOCAL_VISION_MODELS = {
     "LOCAL: Qwen2.5-VL 7B": {
-        "id":      "qwen2.5vl:7b",   # Ollama モデル名（ollama pull qwen2.5vl:7b）
-        "desc":    "完全ローカル推論 / 日本語高精度 / Ollama",
+        "id": "qwen2.5vl:7b",
+        "desc": "完全ローカル推論 / 日本語高精度 / Ollama",
         "backend": "ollama",
         "display": "Qwen2.5-VL 7B [LOCAL / Ollama]",
+    },
+    "LOCAL: Qwen2.5-VL 32B": {
+        "id": "qwen2.5vl:32b",
+        "desc": "高精度ローカル推論 / Ollama",
+        "backend": "ollama",
+        "display": "Qwen2.5-VL 32B [LOCAL / Ollama]",
+    },
+    "LOCAL: Qwen3-VL 8B": {
+        "id": "qwen3-vl:8b",
+        "desc": "最新世代VLM / 軽量 / Ollama",
+        "backend": "ollama",
+        "display": "Qwen3-VL 8B [LOCAL / Ollama]",
+    },
+    "LOCAL: Qwen3-VL 32B": {
+        "id": "qwen3-vl:32b",
+        "desc": "最新世代VLM / 高精度 / Ollama",
+        "backend": "ollama",
+        "display": "Qwen3-VL 32B [LOCAL / Ollama]",
+    },
+    "LOCAL: Llama3.2-Vision 11B FP16": {
+        "id": "llama3.2-vision:11b-instruct-fp16",
+        "desc": "FP16高精度 / Meta / Ollama",
+        "backend": "ollama",
+        "display": "Llama3.2-Vision 11B FP16 [LOCAL / Ollama]",
+    },
+    "LOCAL: Llama3.2-Vision 90B": {
+        "id": "llama3.2-vision:90b",
+        "desc": "大規模ローカル推論 / Ollama",
+        "backend": "ollama",
+        "display": "Llama3.2-Vision 90B [LOCAL / Ollama]",
     },
 }
 
 ALL_VISION_MODELS = {**LOCAL_VISION_MODELS, **NIM_VISION_MODELS, **HF_VISION_MODELS}
 
 TEXT_MODELS = {
-    "Llama 3.3 70B":     {"id": "meta/llama-3.3-70b-instruct",                 "desc": "要約・分析向け"},
-    "Llama 3.1 70B":     {"id": "meta/llama-3.1-70b-instruct",                 "desc": "バランス型"},
-    "Nemotron Super 49B":{"id": "nvidia/llama-3.3-nemotron-super-49b-v1",      "desc": "推論特化・高精度"},
+    "Llama 3.3 70B":      {"id": "meta/llama-3.3-70b-instruct",               "desc": "要約・分析向け"},
+    "Llama 3.1 70B":      {"id": "meta/llama-3.1-70b-instruct",               "desc": "バランス型"},
+    "Nemotron Super 49B": {"id": "nvidia/llama-3.3-nemotron-super-49b-v1",    "desc": "推論特化・高精度"},
 }
 
-# RT-DETR 検知モデル（v1/v2 を個別管理）
 DETECTION_MODELS = {
     "v1": {
         "id":        "PekingU/rtdetr_r50vd",
         "label":     "RT-DETR",
-        "color":     (0, 200, 230),   # シアン BGR
+        "color":     (0, 200, 230),
         "color_hex": "#00c8e6",
     },
     "v2": {
         "id":        "PekingU/rtdetr_v2_r50vd",
         "label":     "RT-DETRv2",
-        "color":     (80, 210, 110),  # グリーン BGR
+        "color":     (80, 210, 110),
         "color_hex": "#50d26e",
     },
 }
@@ -334,8 +370,8 @@ SUMMARIZE_PROMPT = """あなたは動画解析の専門家です。
 この情報を元に、動画全体の内容を日本語で包括的に要約してください。
 
 要約には以下を含めてください：
-1. 動画全体の概要  2. 主要な出来事・シーンの流れ（時系列）
-3. 検出された主要な物体・人物・テキスト  4. 特筆すべき重要な瞬間やハイライト  5. 全体的な考察・結論
+1. 動画全体の概要 2. 主要な出来事・シーンの流れ（時系列）
+3. 検出された主要な物体・人物・テキスト 4. 特筆すべき重要な瞬間やハイライト 5. 全体的な考察・結論
 
 ---
 フレーム分析データ:
@@ -359,10 +395,38 @@ st.set_page_config(
 st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;700;900&family=Rajdhani:wght@300;400;500;600&family=Share+Tech+Mono&display=swap');
+
 .stApp { background-color: #010d1a; color: #b8d8e8; }
 .stApp > header { background: transparent !important; }
 div[data-testid="stSidebar"] { background: #020f1f; border-right: 1px solid #0a2a45; }
 div[data-testid="stSidebar"] * { color: #8ab8cc !important; }
+
+/* ── CPU/GPU 切り替えバナー ── */
+.compute-banner {
+    display: flex; align-items: center; gap: 14px;
+    padding: 8px 16px; border-radius: 3px; margin-bottom: 10px;
+    font-family: 'Orbitron', monospace; font-size: 0.72rem;
+    letter-spacing: 0.12em; text-transform: uppercase;
+}
+.compute-banner.gpu {
+    background: linear-gradient(90deg, #001a10 0%, #002d1a 100%);
+    border: 1px solid #00e57a; border-left: 4px solid #00e57a;
+}
+.compute-banner.cpu {
+    background: linear-gradient(90deg, #0a0d1a 0%, #121a2e 100%);
+    border: 1px solid #4a7aaa; border-left: 4px solid #4a7aaa;
+}
+.compute-icon { font-size: 1.2rem; }
+.compute-label-gpu { color: #00e57a; font-weight: 700; }
+.compute-label-cpu { color: #5ab8d0; font-weight: 700; }
+.compute-detail { color: #3a6a80; font-size: 0.62rem; margin-top: 2px; }
+.compute-perf-badge {
+    margin-left: auto; padding: 3px 10px; border-radius: 2px;
+    font-size: 0.6rem; font-weight: 700; letter-spacing: 0.1em;
+}
+.compute-perf-badge.gpu { background: #00e57a22; color: #00e57a; border: 1px solid #00e57a44; }
+.compute-perf-badge.cpu { background: #4a7aaa22; color: #5ab8d0; border: 1px solid #4a7aaa44; }
+
 .vit-header {
     background: linear-gradient(135deg, #010d1a 0%, #021a35 40%, #02244a 100%);
     border: 1px solid #0a3a60; border-top: 2px solid #00b4d8;
@@ -396,27 +460,33 @@ div[data-testid="stSidebar"] * { color: #8ab8cc !important; }
     margin-bottom: 10px; letter-spacing: 0.05em;
 }
 .status-item { color: #1e5570; text-transform: uppercase; }
-.status-val  { color: #00b4d8; margin-left: 5px; }
+.status-val { color: #00b4d8; margin-left: 5px; }
 .status-val.ok    { color: #00e5a0; }
 .status-val.busy  { color: #ffd166; }
 .status-val.error { color: #ef476f; }
+.status-val.gpu   { color: #00e57a; font-weight: bold; }
+.status-val.cpu   { color: #5ab8d0; }
+
 .analysis-card {
     background: #020f1f; border: 1px solid #0a3a55;
     border-left: 3px solid #00b4d8; border-radius: 2px; padding: 10px 14px; margin: 6px 0;
 }
-.analysis-ts { font-family: 'Share Tech Mono', monospace; font-size: 0.68rem; color: #00b4d8; }
+.analysis-ts   { font-family: 'Share Tech Mono', monospace; font-size: 0.68rem; color: #00b4d8; }
 .analysis-body { color: #b0cce0; font-size: 0.84rem; margin-top: 5px; line-height: 1.6; }
+
 .detection-card {
     background: #020f1f; border: 1px solid #0a3a55; border-radius: 2px;
     padding: 6px 10px; margin: 3px 0;
     font-family: 'Share Tech Mono', monospace; font-size: 0.7rem;
 }
-.det-v1 { border-left: 3px solid #00c8e6; }
-.det-v2 { border-left: 3px solid #50d26e; }
+.det-v1    { border-left: 3px solid #00c8e6; }
+.det-v2    { border-left: 3px solid #50d26e; }
 .det-label { color: #d0e8f0; }
 .det-score { color: #ffd166; margin-left: 8px; }
-.det-tag { font-size: 0.58rem; color: #2a6070; margin-left: 6px; }
+.det-tag   { font-size: 0.58rem; color: #2a6070; margin-left: 6px; }
+
 .search-highlight { background: #004d66; color: #00e5f0; padding: 0 3px; border-radius: 2px; }
+
 .panel-title {
     font-family: 'Orbitron', monospace; font-size: 0.72rem; font-weight: 600;
     color: #2a7a9a; letter-spacing: 0.15em; text-transform: uppercase;
@@ -437,6 +507,7 @@ div[data-testid="stSidebar"] * { color: #8ab8cc !important; }
     border-color: #00b4d8; color: #00d4f5; font-weight: 700;
 }
 .stButton > button[kind="primary"]:hover { background: linear-gradient(135deg, #005070, #0070a0); }
+
 div[data-testid="stTabs"] button {
     font-family: 'Orbitron', monospace !important; font-size: 0.68rem !important;
     letter-spacing: 0.1em !important; color: #2a6a88 !important;
@@ -461,80 +532,179 @@ div[data-testid="stTabs"] button[aria-selected="true"] {
     letter-spacing: 0.1em; padding: 3px 0 5px; margin-bottom: 4px;
     border-bottom: 1px solid #0a2a3e; text-transform: uppercase;
 }
+
+/* GPU ON/OFF ボタン */
+.gpu-btn-wrap {
+    display: flex; flex-direction: column; align-items: flex-end;
+    gap: 6px; padding-top: 8px;
+}
+.gpu-btn-label {
+    font-family: 'Orbitron', monospace; font-size: 0.6rem;
+    color: #2a6a88; letter-spacing: 0.15em; text-transform: uppercase;
+}
+/* ON 状態（緑） */
+button[data-testid="gpu_on_btn"] {
+    background: linear-gradient(135deg, #003a20, #005a30) !important;
+    border: 2px solid #00e57a !important; color: #00e57a !important;
+    font-family: 'Orbitron', monospace !important; font-size: 0.78rem !important;
+    font-weight: 900 !important; letter-spacing: 0.12em !important;
+    border-radius: 3px !important; padding: 8px 18px !important;
+    box-shadow: 0 0 12px rgba(0,229,122,0.3) !important;
+}
+/* OFF 状態（グレーブルー） */
+button[data-testid="gpu_off_btn"] {
+    background: #0a1a2e !important;
+    border: 2px solid #1a4a6a !important; color: #2a7a9a !important;
+    font-family: 'Orbitron', monospace !important; font-size: 0.78rem !important;
+    font-weight: 700 !important; letter-spacing: 0.12em !important;
+    border-radius: 3px !important; padding: 8px 18px !important;
+}
 </style>
 """, unsafe_allow_html=True)
-
-# ─────────────────────────────────────────────
-# ヘッダー
-# ─────────────────────────────────────────────
-st.markdown("""
-<div class="vit-header">
-    <h1>VIDEO INTELLIGENCE TERMINAL
-        <span class="vit-badge">LIVE</span>
-        <span style="font-family:'Rajdhani',sans-serif;font-size:0.9rem;color:#1a6080;
-              font-weight:300;letter-spacing:0.05em;margin-left:14px;">
-            RT-DETR Object Detection + AI Scene Analysis
-        </span>
-    </h1>
-    <div class="subtitle">Powered by NVIDIA NIM / HuggingFace / RT-DETR v1+v2 | Parallel Processing Pipeline</div>
-</div>
-""", unsafe_allow_html=True)
-
-# ─────────────────────────────────────────────
-# APIキー確認
-# ─────────────────────────────────────────────
-if not NVIDIA_API_KEY and not HF_TOKEN:
-    st.error("No API key found. Set NVIDIA_API_KEY or HF_TOKEN in your .env file.")
-    st.code("NVIDIA_API_KEY=nvapi-xxxx...\nHF_TOKEN=hf_xxxx...", language="bash")
-    st.stop()
 
 # ─────────────────────────────────────────────
 # セッション状態 初期化
 # ─────────────────────────────────────────────
 _defaults = {
-    "processing":            False,
-    "youtube_url":           "",
-    "video_file":            None,
-    "stream_url":            None,
-    "is_live":               False,
-    "stream_title":          "",
-    "selected_model":        "LOCAL: Qwen2.5-VL 7B",
-    "current_prompt":        PROMPT_PRESETS["General Detection"],
-    "pending_prompt":        None,   # プリセット Apply 待ちプロンプト
-    "analysis_log":          [],
-    "summary_text":          "",
-    "search_query":          "",
-    "search_results":        [],
+    "processing":           False,
+    "youtube_url":          "",
+    "video_file":           None,
+    "stream_url":           None,
+    "is_live":              False,
+    "stream_title":         "",
+    "selected_model":       "LOCAL: Qwen2.5-VL 7B",
+    "current_prompt":       PROMPT_PRESETS["General Detection"],
+    "pending_prompt":       None,
+    "analysis_log":         [],
+    "summary_text":         "",
+    "search_query":         "",
+    "search_results":       [],
     "total_frames_analyzed": 0,
-    "mode":                  "YouTube",
-    "highlights":            [],
-    "local_folder":          DEFAULT_FOLDER,
-    # RT-DETR 個別 ON/OFF
-    "det_v1_enabled":        True,
-    "det_v2_enabled":        True,
-    "last_det_count":        {"v1": 0, "v2": 0},
+    "mode":                 "YouTube",
+    "highlights":           [],
+    "local_folder":         DEFAULT_FOLDER,
+    "det_v1_enabled":       True,
+    "det_v2_enabled":       True,
+    "last_det_count":       {"v1": 0, "v2": 0},
+    # ── 新規: GPU/CPU 切り替え ──
+    "use_gpu":              True,
+    # ── パフォーマンス計測 ──
+    "perf_history":         [],   # {"mode": "GPU"/"CPU", "latency": float, "ts": str}
 }
 for _k, _v in _defaults.items():
     if _k not in st.session_state:
         st.session_state[_k] = _v
 
 # ─────────────────────────────────────────────
-# RT-DETR モデルキャッシュロード
+# ヘッダー（CPU/GPU バナー含む）
+# ─────────────────────────────────────────────
+header_col, mode_col = st.columns([3, 1])
+
+with header_col:
+    st.markdown("""
+    <div class="vit-header">
+      <h1>VIDEO INTELLIGENCE TERMINAL
+        <span class="vit-badge">LIVE</span>
+        <span style="font-family:'Rajdhani',sans-serif;font-size:0.9rem;color:#1a6080;
+              font-weight:300;letter-spacing:0.05em;margin-left:14px;">
+          RT-DETR Object Detection + AI Scene Analysis
+        </span>
+      </h1>
+      <div class="subtitle">Powered by NVIDIA NIM / HuggingFace / RT-DETR v1+v2 | Parallel Processing Pipeline</div>
+    </div>
+    """, unsafe_allow_html=True)
+
+with mode_col:
+    st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+    st.markdown("<div class='gpu-btn-label'>⚡ COMPUTE MODE</div>", unsafe_allow_html=True)
+
+    # ── GPU ON/OFF トグルボタン（UI左上部に配置） ──
+    if st.session_state.use_gpu:
+        # GPU ON 状態 → ボタンを押すと CPU へ
+        if st.button(
+            "⚡ GPU  ON",
+            key="gpu_toggle_btn",
+            help="クリックすると CPU モードへ切り替え",
+            use_container_width=True,
+        ):
+            st.session_state.use_gpu = False
+            st.cache_resource.clear()
+            st.rerun()
+        st.markdown(
+            "<div style='font-family:Share Tech Mono,monospace;font-size:0.6rem;"
+            "color:#00e57a;text-align:center;margin-top:2px;'>H100 ACTIVE</div>",
+            unsafe_allow_html=True,
+        )
+    else:
+        # GPU OFF 状態 → ボタンを押すと GPU へ
+        if st.button(
+            "💻 GPU  OFF",
+            key="gpu_toggle_btn",
+            help="クリックすると GPU モードへ切り替え",
+            use_container_width=True,
+        ):
+            st.session_state.use_gpu = True
+            st.cache_resource.clear()
+            st.rerun()
+        st.markdown(
+            "<div style='font-family:Share Tech Mono,monospace;font-size:0.6rem;"
+            "color:#2a7a9a;text-align:center;margin-top:2px;'>CPU MODE</div>",
+            unsafe_allow_html=True,
+        )
+
+# ── CPU/GPU バナー表示 ──
+_mode_str = "GPU" if st.session_state.use_gpu else "CPU"
+_ollama_endpoint = get_ollama_url(st.session_state.use_gpu)
+_rt_device = get_compute_device(st.session_state.use_gpu)
+
+if st.session_state.use_gpu:
+    st.markdown(f"""
+    <div class="compute-banner gpu">
+      <span class="compute-icon">⚡</span>
+      <div>
+        <div class="compute-label-gpu">GPU MODE — NVIDIA H100 ACTIVE</div>
+        <div class="compute-detail">
+          RT-DETR Device: <b>CUDA</b> &nbsp;|&nbsp;
+          Ollama: <b>{OLLAMA_GPU_URL}</b> &nbsp;|&nbsp;
+          VLM: GPU Server (192.168.11.111)
+        </div>
+      </div>
+      <span class="compute-perf-badge gpu">HIGH PERFORMANCE</span>
+    </div>
+    """, unsafe_allow_html=True)
+else:
+    st.markdown(f"""
+    <div class="compute-banner cpu">
+      <span class="compute-icon">💻</span>
+      <div>
+        <div class="compute-label-cpu">CPU MODE — LOCAL COMPUTE</div>
+        <div class="compute-detail">
+          RT-DETR Device: <b>CPU</b> &nbsp;|&nbsp;
+          Ollama: <b>{OLLAMA_CPU_URL}</b> &nbsp;|&nbsp;
+          VLM: Localhost
+        </div>
+      </div>
+      <span class="compute-perf-badge cpu">STANDARD MODE</span>
+    </div>
+    """, unsafe_allow_html=True)
+
+# ─────────────────────────────────────────────
+# APIキー確認
+# ─────────────────────────────────────────────
+if not NVIDIA_API_KEY and not HF_TOKEN:
+    st.warning("⚠️ NVIDIA_API_KEY / HF_TOKEN が未設定です。NIM/HF モデルは使用不可ですが、ローカル Ollama は利用可能です。")
+
+# ─────────────────────────────────────────────
+# RT-DETR モデルキャッシュロード（GPU/CPU 対応）
 # ─────────────────────────────────────────────
 @st.cache_resource(show_spinner=False)
-def load_rtdetr_v1():
-    """
-    RT-DETR v1 をロード。
-    キャッシュ未存在の場合は即座にスキップ（社内ネットワークでのタイムアウト防止）。
-    社外で python3 download_models.py を実行後に有効になる。
-    """
+def load_rtdetr_v1(use_gpu: bool):
     if not DETECTION_AVAILABLE:
         return None, None, None, "torch/transformers not installed"
     if not _RTDETR_CACHED:
-        return None, None, None, "モデル未キャッシュ。社外で download_models.py を実行してください"
+        return None, None, None, "モデル未キャッシュ。download_models.py を実行してください"
     try:
-        device = ("mps"  if torch.backends.mps.is_available() else
-                  "cuda" if torch.cuda.is_available() else "cpu")
+        device = get_compute_device(use_gpu)
         cfg  = DETECTION_MODELS["v1"]
         proc  = AutoImageProcessor.from_pretrained(cfg["id"], trust_remote_code=False, local_files_only=True)
         model = AutoModelForObjectDetection.from_pretrained(cfg["id"], trust_remote_code=False, local_files_only=True)
@@ -544,17 +714,14 @@ def load_rtdetr_v1():
     except Exception as exc:
         return None, None, None, str(exc)
 
-
 @st.cache_resource(show_spinner=False)
-def load_rtdetr_v2():
-    """RT-DETRv2 をロード（キャッシュ未存在時は即スキップ）"""
+def load_rtdetr_v2(use_gpu: bool):
     if not DETECTION_AVAILABLE:
         return None, None, None, "torch/transformers not installed"
     if not _RTDETR_CACHED:
-        return None, None, None, "モデル未キャッシュ。社外で download_models.py を実行してください"
+        return None, None, None, "モデル未キャッシュ。download_models.py を実行してください"
     try:
-        device = ("mps"  if torch.backends.mps.is_available() else
-                  "cuda" if torch.cuda.is_available() else "cpu")
+        device = get_compute_device(use_gpu)
         cfg  = DETECTION_MODELS["v2"]
         proc  = AutoImageProcessor.from_pretrained(cfg["id"], trust_remote_code=False, local_files_only=True)
         model = AutoModelForObjectDetection.from_pretrained(cfg["id"], trust_remote_code=False, local_files_only=True)
@@ -564,17 +731,14 @@ def load_rtdetr_v2():
     except Exception as exc:
         return None, None, None, str(exc)
 
-
 # ─────────────────────────────────────────────
 # ユーティリティ関数
 # ─────────────────────────────────────────────
-
 def frame_to_base64(frame_rgb: np.ndarray, quality: int = 90) -> str:
     pil = Image.fromarray(frame_rgb)
     buf = io.BytesIO()
     pil.save(buf, format="JPEG", quality=quality)
     return base64.b64encode(buf.getvalue()).decode()
-
 
 def resize_frame(frame: np.ndarray, scale_pct: int) -> np.ndarray:
     if scale_pct >= 100:
@@ -583,43 +747,35 @@ def resize_frame(frame: np.ndarray, scale_pct: int) -> np.ndarray:
     return cv2.resize(frame, (int(w * scale_pct / 100), int(h * scale_pct / 100)),
                       interpolation=cv2.INTER_AREA)
 
-
 def draw_detection_boxes(frame_rgb: np.ndarray, detections: dict) -> np.ndarray:
-    """RT-DETR v1(シアン) / v2(グリーン) のボックスをフレームに描画"""
     frame = frame_rgb.copy()
     for ver, dets in detections.items():
         cfg   = DETECTION_MODELS.get(ver, {})
         color = cfg.get("color", (200, 200, 200))
         for det in (dets or []):
             x1, y1, x2, y2 = det["box"]
-            score  = det["score"]
-            lbl    = det["label"]
-            text   = f"{lbl} {score:.2f}"
+            score = det["score"]
+            lbl   = det["label"]
+            text  = f"{lbl} {score:.2f}"
             cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
             font = cv2.FONT_HERSHEY_SIMPLEX
-            fs   = 0.44
-            th   = 1
+            fs, th = 0.44, 1
             (tw, th_px), bl = cv2.getTextSize(text, font, fs, th)
             pad = 3
             cv2.rectangle(frame,
-                (x1, max(0, y1 - th_px - pad * 2 - bl)),
-                (x1 + tw + pad * 2, y1), color, -1)
+                          (x1, max(0, y1 - th_px - pad * 2 - bl)),
+                          (x1 + tw + pad * 2, y1), color, -1)
             cv2.putText(frame, text,
-                (x1 + pad, max(th_px + pad, y1 - bl - pad)),
-                font, fs, (5, 5, 5), th, cv2.LINE_AA)
+                        (x1 + pad, max(th_px + pad, y1 - bl - pad)),
+                        font, fs, (5, 5, 5), th, cv2.LINE_AA)
     return frame
 
-
 def run_detection(frame_rgb: np.ndarray, use_v1: bool, use_v2: bool,
-                  threshold: float = 0.45) -> dict:
-    """
-    有効なモデルだけ推論を実行。
-    戻り値: {"v1": [...], "v2": [...], "error": None}
-    """
+                  threshold: float = 0.45, use_gpu: bool = True) -> dict:
     result = {"v1": [], "v2": [], "error": None}
 
     if use_v1:
-        proc, model, device, err = load_rtdetr_v1()
+        proc, model, device, err = load_rtdetr_v1(use_gpu)
         if err:
             result["error"] = f"v1: {err}"
         elif proc and model:
@@ -629,7 +785,7 @@ def run_detection(frame_rgb: np.ndarray, use_v1: bool, use_v2: bool,
                 inp = {k: v.to(device) for k, v in inp.items()}
                 with torch.no_grad():
                     out = model(**inp)
-                ts  = torch.tensor([[pil.height, pil.width]])
+                ts    = torch.tensor([[pil.height, pil.width]])
                 preds = proc.post_process_object_detection(out, threshold=threshold, target_sizes=ts)[0]
                 for sc, lid, box in zip(preds["scores"], preds["labels"], preds["boxes"]):
                     result["v1"].append({
@@ -641,7 +797,7 @@ def run_detection(frame_rgb: np.ndarray, use_v1: bool, use_v2: bool,
                 result["error"] = f"v1 inference: {exc}"
 
     if use_v2:
-        proc, model, device, err = load_rtdetr_v2()
+        proc, model, device, err = load_rtdetr_v2(use_gpu)
         if err:
             result["error"] = (result["error"] or "") + f" | v2: {err}"
         elif proc and model:
@@ -651,7 +807,7 @@ def run_detection(frame_rgb: np.ndarray, use_v1: bool, use_v2: bool,
                 inp = {k: v.to(device) for k, v in inp.items()}
                 with torch.no_grad():
                     out = model(**inp)
-                ts  = torch.tensor([[pil.height, pil.width]])
+                ts    = torch.tensor([[pil.height, pil.width]])
                 preds = proc.post_process_object_detection(out, threshold=threshold, target_sizes=ts)[0]
                 for sc, lid, box in zip(preds["scores"], preds["labels"], preds["boxes"]):
                     result["v2"].append({
@@ -664,30 +820,32 @@ def run_detection(frame_rgb: np.ndarray, use_v1: bool, use_v2: bool,
 
     return result
 
-
-def _ollama_analyze(frame_rgb, prompt, model_id, resize_pct, max_tokens) -> dict:
-    """Ollama ローカル推論（Qwen2-VL 等のビジョンモデル対応）
-    HuggingFace 版と異なり量子化済みモデルを使うため大幅に高速。
-    事前に: ollama pull qwen2-vl:7b が必要。
-    Ollama が起動していない場合は: ollama serve
+def _ollama_analyze(frame_rgb, prompt, model_id, resize_pct, max_tokens,
+                    use_gpu: bool = True) -> dict:
+    """
+    Ollama ローカル推論。
+    use_gpu=True  → GPUサーバー (192.168.11.111:11434)
+    use_gpu=False → ローカル    (localhost:11434)
     """
     if resize_pct < 100:
         frame_rgb = resize_frame(frame_rgb, resize_pct)
     img_b64 = frame_to_base64(frame_rgb)
-    t0 = time.time()
+    t0      = time.time()
+    base_url = get_ollama_url(use_gpu)
+
     try:
         payload = {
-            "model":  model_id,
+            "model": model_id,
             "prompt": prompt,
             "images": [img_b64],
             "stream": False,
             "options": {
-                "num_predict": min(max_tokens, 400),
+                "num_predict": min(max_tokens, 600 if use_gpu else 400),
                 "temperature": 0.2,
             },
         }
         resp = requests.post(
-            "http://localhost:11434/api/generate",
+            f"{base_url}/api/generate",
             json=payload,
             timeout=120,
             verify=False,
@@ -699,11 +857,12 @@ def _ollama_analyze(frame_rgb, prompt, model_id, resize_pct, max_tokens) -> dict
                 "text":    resp.json().get("response", ""),
                 "latency": latency,
                 "img_b64": img_b64,
+                "device":  "GPU" if use_gpu else "CPU",
             }
         elif resp.status_code == 404:
             return {
                 "ok":      False,
-                "text":    f"Ollamaモデル未インストール。Terminalで実行: ollama pull {model_id}",
+                "text":    f"Ollamaモデル未インストール。実行: ollama pull {model_id}",
                 "latency": latency,
             }
         return {
@@ -712,29 +871,28 @@ def _ollama_analyze(frame_rgb, prompt, model_id, resize_pct, max_tokens) -> dict
             "latency": latency,
         }
     except requests.exceptions.ConnectionError:
+        target = f"GPUサーバー ({OLLAMA_GPU_URL})" if use_gpu else f"ローカル ({OLLAMA_CPU_URL})"
         return {
             "ok":      False,
-            "text":    "Ollamaが起動していません。Terminalで: ollama serve",
+            "text":    f"Ollamaに接続できません: {target}",
             "latency": time.time() - t0,
         }
     except Exception as exc:
         return {"ok": False, "text": f"Ollamaエラー: {exc}", "latency": time.time() - t0}
 
-
-def vlm_analyze(frame_rgb, prompt, model_name, resize_pct=100, max_tokens=600) -> dict:
-    """VLM 分析（local / NIM / HF バックエンド自動選択）"""
+def vlm_analyze(frame_rgb, prompt, model_name, resize_pct=100,
+                max_tokens=600, use_gpu=True) -> dict:
     cfg = ALL_VISION_MODELS.get(model_name)
     if not cfg:
         return {"ok": False, "text": f"Unknown model: {model_name}", "latency": 0.0}
     if cfg["backend"] == "ollama":
-        return _ollama_analyze(frame_rgb, prompt, cfg["id"], resize_pct, max_tokens)
+        return _ollama_analyze(frame_rgb, prompt, cfg["id"],
+                               resize_pct, max_tokens, use_gpu)
     if cfg["backend"] == "nim":
         return _nim_analyze(frame_rgb, prompt, cfg["id"], resize_pct, max_tokens)
     return _hf_analyze(frame_rgb, prompt, cfg["id"], resize_pct, max_tokens)
 
-
 def _nim_analyze(frame_rgb, prompt, model_id, resize_pct, max_tokens) -> dict:
-    """NVIDIA NIM Vision API"""
     if resize_pct < 100:
         frame_rgb = resize_frame(frame_rgb, resize_pct)
     img_b64 = frame_to_base64(frame_rgb)
@@ -755,17 +913,15 @@ def _nim_analyze(frame_rgb, prompt, model_id, resize_pct, max_tokens) -> dict:
         )
         latency = time.time() - t0
         if resp.status_code == 200:
-            return {"ok": True, "text": resp.json()["choices"][0]["message"]["content"],
-                    "latency": latency, "img_b64": img_b64}
+            return {"ok": True,  "text": resp.json()["choices"][0]["message"]["content"],
+                    "latency": latency, "img_b64": img_b64, "device": "NIM API"}
         return {"ok": False, "text": f"NIM {resp.status_code}: {resp.text[:300]}", "latency": latency}
     except requests.Timeout:
         return {"ok": False, "text": "Timeout (90s)", "latency": 90.0}
     except Exception as exc:
         return {"ok": False, "text": f"NIM error: {exc}", "latency": 0.0}
 
-
 def _hf_analyze(frame_rgb, prompt, model_id, resize_pct, max_tokens) -> dict:
-    """HuggingFace Inference API（NIM 代替・無料枠）"""
     if not HF_HUB_AVAILABLE:
         return {"ok": False, "text": "huggingface_hub not installed", "latency": 0.0}
     if not HF_TOKEN:
@@ -775,7 +931,7 @@ def _hf_analyze(frame_rgb, prompt, model_id, resize_pct, max_tokens) -> dict:
     img_b64 = frame_to_base64(frame_rgb)
     t0 = time.time()
     try:
-        client = InferenceClient(token=HF_TOKEN)
+        client   = InferenceClient(token=HF_TOKEN)
         response = client.chat_completion(
             model=model_id,
             messages=[{"role": "user", "content": [
@@ -785,16 +941,15 @@ def _hf_analyze(frame_rgb, prompt, model_id, resize_pct, max_tokens) -> dict:
             max_tokens=max_tokens,
         )
         return {"ok": True, "text": response.choices[0].message.content,
-                "latency": time.time() - t0, "img_b64": img_b64}
+                "latency": time.time() - t0, "img_b64": img_b64, "device": "HF API"}
     except Exception as exc:
         return {"ok": False, "text": f"HF error: {exc}", "latency": time.time() - t0}
-
 
 def nim_text_summarize(analysis_log: list, model_name: str = "Llama 3.3 70B") -> dict:
     model_id = TEXT_MODELS.get(model_name, TEXT_MODELS["Llama 3.3 70B"])["id"]
     log_str  = "\n\n".join([f"[{e['ts']}] Frame {e['frame_idx']}: {e['text']}" for e in analysis_log])
     payload  = {
-        "model": model_id,
+        "model":    model_id,
         "messages": [{"role": "user", "content": SUMMARIZE_PROMPT.format(analysis_data=log_str)}],
         "max_tokens": 1500, "temperature": 0.3, "stream": False,
     }
@@ -812,24 +967,15 @@ def nim_text_summarize(analysis_log: list, model_name: str = "Llama 3.3 70B") ->
     except Exception as exc:
         return {"ok": False, "text": str(exc)}
 
-
 def search_analysis_log(log: list, query: str) -> list:
     if not query.strip():
         return []
     keywords = [k.strip().lower() for k in re.split(r"[\s\u3000,\u3001]", query) if k.strip()]
     return [e for e in log if any(kw in e["text"].lower() for kw in keywords)]
 
-
 def extract_tags(log: list, top_n: int = 40) -> list:
-    """
-    分析ログから頻出キーワードを自動抽出してタグ一覧を返す。
-    日本語・英語混在テキストを単語単位で分割し、
-    ストップワードを除いて出現頻度順にソート。
-    """
     import re
     from collections import Counter
-
-    # 除外する短すぎる語・一般的すぎる語（日本語・英語）
     STOPWORDS = {
         "の","に","は","を","が","で","と","た","し","て","い","な","こ","れ","も","から",
         "です","ます","いる","ある","この","その","また","など","よう","これ","それ",
@@ -837,23 +983,16 @@ def extract_tags(log: list, top_n: int = 40) -> list:
         "are","was","were","be","been","has","have","it","its","for","as","by","from",
         "画像","写真","フレーム","場面","状況","内容","様子","見え","られ","なっ","おり",
     }
-
     counter = Counter()
     for entry in log:
-        text = entry.get("text", "")
-        # 日本語: 2文字以上の連続したひらがな・カタカナ・漢字
+        text     = entry.get("text", "")
         jp_words = re.findall(r'[一-龯ぁ-んァ-ン]{2,}', text)
-        # 英語: 3文字以上のアルファベット
         en_words = re.findall(r'[A-Za-z]{3,}', text)
         for w in jp_words + en_words:
             wl = w.lower()
             if wl not in STOPWORDS and len(wl) >= 2:
                 counter[w] += 1
-
-    # 出現2回以上のものをタグ候補とする
-    tags = [w for w, c in counter.most_common(top_n) if c >= 1]
-    return tags
-
+    return [w for w, c in counter.most_common(top_n) if c >= 1]
 
 def highlight_text(text: str, query: str) -> str:
     if not query:
@@ -861,16 +1000,14 @@ def highlight_text(text: str, query: str) -> str:
     for kw in re.split(r"[\s\u3000,\u3001]", query):
         if kw.strip():
             text = re.sub(re.escape(kw.strip()),
-                f'<span class="search-highlight">{kw.strip()}</span>',
-                text, flags=re.IGNORECASE)
+                          f'<span class="search-highlight">{kw.strip()}</span>',
+                          text, flags=re.IGNORECASE)
     return text
-
 
 def detect_highlights(log: list, top_n: int = 5) -> list:
     if not log:
         return []
     return sorted(log, key=lambda x: len(x.get("text", "")), reverse=True)[:top_n]
-
 
 def download_youtube(url: str) -> tuple:
     if not YT_DLP_AVAILABLE:
@@ -883,17 +1020,16 @@ def download_youtube(url: str) -> tuple:
         with yt_dlp.YoutubeDL(opts) as ydl:
             info  = ydl.extract_info(url, download=True)
             title = info.get("title", "Unknown")
-        for ext in [".mp4", ".webm", ".mkv", ".m4a"]:
-            p = Path(DOWNLOAD_DIR) / f"video_{ts}{ext}"
-            if p.exists():
-                return str(p), title
-        for f in Path(DOWNLOAD_DIR).iterdir():
-            if f.name.startswith(f"video_{ts}"):
-                return str(f), f.stem
-        return None, "File not found after download"
+            for ext in [".mp4", ".webm", ".mkv", ".m4a"]:
+                p = Path(DOWNLOAD_DIR) / f"video_{ts}{ext}"
+                if p.exists():
+                    return str(p), title
+            for f in Path(DOWNLOAD_DIR).iterdir():
+                if f.name.startswith(f"video_{ts}"):
+                    return str(f), f.stem
+            return None, "File not found after download"
     except Exception as exc:
         return None, str(exc)
-
 
 def get_stream_url(url: str) -> tuple:
     if not YT_DLP_AVAILABLE:
@@ -920,7 +1056,6 @@ def get_stream_url(url: str) -> tuple:
     except Exception as exc:
         return None, "", False, str(exc)
 
-
 def get_video_files(folder: str) -> list:
     video_exts = {".mp4", ".webm", ".mkv", ".mov", ".avi", ".m4v", ".ts"}
     try:
@@ -929,12 +1064,14 @@ def get_video_files(folder: str) -> list:
     except Exception:
         return []
 
-
-def make_status_bar(status, latency, frames, model_full, det_v1, det_v2) -> str:
-    sc = "ok" if status in ("READY", "OK") else ("busy" if status == "ANALYZING" else "")
+def make_status_bar(status, latency, frames, model_full,
+                    det_v1, det_v2, compute_mode) -> str:
+    sc       = "ok" if status in ("READY", "OK") else ("busy" if status == "ANALYZING" else "")
+    mode_cls = "gpu" if compute_mode == "GPU" else "cpu"
     return (
         f"<div class='status-bar'>"
         f"<span class='status-item'>STATUS <span class='status-val {sc}'>{status}</span></span>"
+        f"<span class='status-item'>COMPUTE <span class='status-val {mode_cls}'>{compute_mode}</span></span>"
         f"<span class='status-item'>LATENCY <span class='status-val'>{latency}</span></span>"
         f"<span class='status-item'>FRAMES <span class='status-val'>{frames}</span></span>"
         f"<span class='status-item'>RT-DETR <span class='status-val'>{det_v1}</span>"
@@ -956,17 +1093,32 @@ with st.sidebar:
     # API Status
     with st.expander("API Status", expanded=False):
         if NVIDIA_API_KEY:
-            st.success(f"NVIDIA API Key set  `...{NVIDIA_API_KEY[-8:]}`")
+            st.success(f"NVIDIA API Key set `...{NVIDIA_API_KEY[-8:]}`")
         else:
             st.warning("NVIDIA_API_KEY not set")
         if HF_TOKEN:
-            st.success(f"HuggingFace Token set  `...{HF_TOKEN[-8:]}`")
+            st.success(f"HuggingFace Token set `...{HF_TOKEN[-8:]}`")
         else:
             st.info("HF_TOKEN not set")
         ssl_mode = "CA Bundle: " + _ca_bundle if _ca_bundle else "SSL verify: OFF (proxy mode)"
         st.caption(ssl_mode)
-        if st.button("Test NIM Connection", width='stretch'):
-            with st.spinner("Testing..."):
+
+        # Ollama 接続テスト（現在のモードに応じて接続先を変える）
+        if st.button("Test Ollama Connection", key="test_ollama"):
+            with st.spinner("Testing Ollama..."):
+                try:
+                    r = requests.get(f"{get_ollama_url(st.session_state.use_gpu)}/api/tags",
+                                     timeout=10, verify=False)
+                    if r.status_code == 200:
+                        models_list = r.json().get("models", [])
+                        st.success(f"OK — Ollama 接続成功 ({len(models_list)} models)")
+                    else:
+                        st.error(f"HTTP {r.status_code}")
+                except Exception as exc:
+                    st.error(str(exc))
+
+        if st.button("Test NIM Connection", key="test_nim"):
+            with st.spinner("Testing NIM..."):
                 try:
                     r = requests.get(f"{NIM_BASE_URL}/models",
                                      headers={"Authorization": f"Bearer {NVIDIA_API_KEY}"},
@@ -977,6 +1129,24 @@ with st.sidebar:
                         st.error(f"HTTP {r.status_code}: {r.text[:100]}")
                 except Exception as exc:
                     st.error(str(exc))
+
+    st.divider()
+
+    # ── RT-DETR 設定 ──────────────────────────────────────────
+    st.markdown("<div class='section-label'>Object Detection</div>", unsafe_allow_html=True)
+
+    _device_label = f"CUDA ({_rt_device})" if st.session_state.use_gpu and _rt_device == "cuda" else f"CPU"
+    st.caption(f"Device: **{_device_label}**")
+
+    det_v1_col, det_v2_col = st.columns(2)
+    with det_v1_col:
+        st.session_state.det_v1_enabled = st.toggle(
+            "RT-DETR v1", value=st.session_state.det_v1_enabled, key="tog_v1")
+    with det_v2_col:
+        st.session_state.det_v2_enabled = st.toggle(
+            "RT-DETRv2",  value=st.session_state.det_v2_enabled, key="tog_v2")
+
+    det_threshold = st.slider("Detection Threshold", 0.1, 0.9, 0.45, 0.05)
 
     st.divider()
 
@@ -1000,683 +1170,526 @@ with st.sidebar:
         if yt_url != st.session_state.youtube_url:
             st.session_state.youtube_url = yt_url
             st.session_state.video_file  = None
-            st.session_state.stream_url  = None
-        with st.expander("URL Presets"):
-            _pu = {
-                "Shibuya Scramble": ("https://youtu.be/7RCvUO7omGM", "Shibuya Scramble"),
-                "Road Traffic 1":   ("https://youtu.be/oe0apEwF2wM", "Traffic / Vehicle"),
-                "Road Traffic 2":   ("https://youtu.be/PCCbzqWqyKc", "Traffic / Vehicle"),
-            }
-            for _lbl, (_url, _pk) in _pu.items():
-                if st.button(_lbl, width='stretch', key=f"pyt_{_lbl}"):
-                    st.session_state.youtube_url    = _url
-                    st.session_state.current_prompt = PROMPT_PRESETS.get(_pk, PROMPT_PRESETS["General Detection"])
-                    st.session_state.video_file = None; st.session_state.stream_url = None
-                    st.rerun()
-        if st.button("Download Video", width='stretch', type="primary"):
-            if not st.session_state.youtube_url:
-                st.warning("Enter a URL first")
-            else:
+
+        if st.button("Download Video", type="primary"):
+            if st.session_state.youtube_url:
                 with st.spinner("Downloading..."):
                     path, title = download_youtube(st.session_state.youtube_url)
                     if path:
-                        st.session_state.video_file = path; st.session_state.stream_url = None
-                        st.success(f"Ready: {title}")
+                        st.session_state.video_file  = path
+                        st.session_state.stream_title = title
+                        st.success(f"Downloaded: {title}")
                     else:
-                        st.error(f"Failed: {title}")
-        if st.session_state.video_file and Path(st.session_state.video_file).exists():
-            fsize = Path(st.session_state.video_file).stat().st_size / 1024 / 1024
-            st.caption(f"{Path(st.session_state.video_file).name}  ({fsize:.1f} MB)")
+                        st.error(f"Error: {title}")
 
     elif st.session_state.mode == "Live":
-        st.caption("Stream is analyzed directly — no download needed.")
         live_url = st.text_input("Live Stream URL", value=st.session_state.youtube_url,
-                                 placeholder="https://www.youtube.com/live/xxxx")
+                                 placeholder="https://youtu.be/live_xxxx")
         if live_url != st.session_state.youtube_url:
-            st.session_state.youtube_url = live_url; st.session_state.stream_url = None
-        with st.expander("Live Presets", expanded=True):
-            _lp = {
-                "Shibuya Scramble (Live)": ("https://youtu.be/7RCvUO7omGM", "Shibuya Scramble"),
-                "Tokyo Expressway (Live)": ("https://www.youtube.com/live/uL-DQhXR57I", "Congestion Monitor"),
-            }
-            for _lbl, (_url, _pk) in _lp.items():
-                if st.button(_lbl, width='stretch', key=f"plv_{_lbl}"):
-                    st.session_state.youtube_url    = _url
-                    st.session_state.current_prompt = PROMPT_PRESETS.get(_pk, PROMPT_PRESETS["General Detection"])
-                    st.session_state.stream_url = None; st.rerun()
-        if st.button("Connect Stream", width='stretch', type="primary"):
-            if not st.session_state.youtube_url:
-                st.warning("Enter a stream URL first")
-            else:
-                with st.spinner("Resolving stream URL..."):
-                    surl, title, is_live, err = get_stream_url(st.session_state.youtube_url)
-                    if surl:
-                        st.session_state.stream_url   = surl
-                        st.session_state.stream_title = title
-                        st.session_state.is_live      = is_live
-                        st.session_state.video_file   = None
-                        st.success(f"{'LIVE' if is_live else 'VOD'} — {title}")
+            st.session_state.youtube_url = live_url
+            st.session_state.stream_url  = None
+
+        if st.button("Connect Live", type="primary"):
+            if st.session_state.youtube_url:
+                with st.spinner("Connecting..."):
+                    url, title, is_live, err = get_stream_url(st.session_state.youtube_url)
+                    if url:
+                        st.session_state.stream_url   = url
+                        st.session_state.stream_title  = title
+                        st.session_state.is_live       = is_live
+                        st.success(f"{'LIVE' if is_live else 'VOD'}: {title}")
                     else:
-                        st.error(f"Failed: {err}")
-        if st.session_state.stream_url:
-            st.caption(f"{'LIVE' if st.session_state.is_live else 'VOD'}: {st.session_state.stream_title[:35]}...")
+                        st.error(f"Error: {err}")
 
-    else:  # Local Folder
-        folder_path = st.text_input("Video Folder Path", value=st.session_state.local_folder,
-                                    placeholder="/path/to/videos")
-        if folder_path != st.session_state.local_folder:
-            st.session_state.local_folder = folder_path
-        local_files = get_video_files(st.session_state.local_folder)
-        if local_files:
-            selected = st.selectbox(
-                "Select File", options=local_files,
-                format_func=lambda p: f"{p.name}  ({p.stat().st_size/1024/1024:.1f} MB)",
-            )
-            st.session_state.video_file = str(selected)
-            st.session_state.stream_url = None
+    else:  # Local
+        folder = st.text_input("Video Folder", value=st.session_state.local_folder)
+        if folder != st.session_state.local_folder:
+            st.session_state.local_folder = folder
+        files = get_video_files(folder)
+        if files:
+            sel = st.selectbox("Select Video", [f.name for f in files])
+            if sel:
+                st.session_state.video_file = str(Path(folder) / sel)
         else:
-            st.warning(f"No video files in: {st.session_state.local_folder}")
+            st.info("No video files found")
 
     st.divider()
 
-    # Vision Model
-    st.markdown("<div class='section-label'>Vision Model</div>", unsafe_allow_html=True)
-    _opts    = list(ALL_VISION_MODELS.keys())
-    _def_idx = _opts.index(st.session_state.selected_model) \
-               if st.session_state.selected_model in _opts else 0
-    selected_model = st.selectbox(
-        "Vision Model", options=_opts, index=_def_idx,
-        label_visibility="collapsed",
-    )
-    st.session_state.selected_model = selected_model
-    _mcfg = ALL_VISION_MODELS[selected_model]
-    st.caption(f"`{_mcfg['id']}`")
-    st.caption(f"{_mcfg['backend'].upper()} — {_mcfg['desc']}")
+    # VLM モデル選択
+    st.markdown("<div class='section-label'>VLM Model</div>", unsafe_allow_html=True)
+    _ollama_url_label = f"Ollama → {'GPU Server' if st.session_state.use_gpu else 'Localhost'}"
+    st.caption(_ollama_url_label)
 
-    st.divider()
-
-    # ── RT-DETR 物体検知: v1 / v2 を個別 ON/OFF ──
-    st.markdown("<div class='section-label'>Object Detection</div>", unsafe_allow_html=True)
-
-    det_v1_enabled = st.checkbox(
-        "RT-DETR  (cyan box)",
-        value=st.session_state.det_v1_enabled,
-        help="PekingU/rtdetr_r50vd — シアンのボックスで描画",
-    )
-    det_v2_enabled = st.checkbox(
-        "RT-DETRv2  (green box)",
-        value=st.session_state.det_v2_enabled,
-        help="PekingU/rtdetr_v2_r50vd — グリーンのボックスで描画",
-    )
-    st.session_state.det_v1_enabled = det_v1_enabled
-    st.session_state.det_v2_enabled = det_v2_enabled
-
-    det_threshold = st.slider("Confidence Threshold", 0.2, 0.9, 0.45, 0.05)
-    det_interval  = st.slider("Detection Interval (s)", 0.5, 10.0, 2.0, 0.5)
-
-    det_any = det_v1_enabled or det_v2_enabled
-    if det_any and DETECTION_AVAILABLE:
-        if st.button("Pre-load Detection Models", width='stretch'):
-            with st.spinner("Loading from HuggingFace Hub..."):
-                msgs = []
-                if det_v1_enabled:
-                    _, _, dev, err = load_rtdetr_v1()
-                    msgs.append(f"RT-DETR: {'OK on ' + dev if not err else 'ERR ' + str(err)}")
-                if det_v2_enabled:
-                    _, _, dev, err = load_rtdetr_v2()
-                    msgs.append(f"RT-DETRv2: {'OK on ' + dev if not err else 'ERR ' + str(err)}")
-                st.success("  |  ".join(msgs))
-    elif not DETECTION_AVAILABLE:
-        st.caption("Install torch + transformers to enable")
+    model_options = list(ALL_VISION_MODELS.keys())
+    cur_idx       = model_options.index(st.session_state.selected_model) \
+                    if st.session_state.selected_model in model_options else 0
+    sel_model     = st.selectbox("VLM Model", model_options,
+                                 index=cur_idx, label_visibility="collapsed")
+    if sel_model != st.session_state.selected_model:
+        st.session_state.selected_model = sel_model
 
     st.divider()
 
     # Analysis Settings
     st.markdown("<div class='section-label'>Analysis Settings</div>", unsafe_allow_html=True)
-    img_resize     = st.slider("Image Resize (%)",            25, 100, 80, 5)
-    proc_interval  = st.slider("VLM Interval (s)",             2,  30,  8)
-    playback_dur   = st.slider("Max Analysis Duration (s)",   10, 600, 120)
-    max_tokens_val = st.slider("Max Tokens",                 200, 1200, 600, 100)
+    vlm_interval  = st.slider("VLM Interval (s)",  1, 30, 10, 1)
+    max_tokens    = st.slider("Max Tokens",        100, 1000, 600 if st.session_state.use_gpu else 300, 50)
+    resize_pct    = st.slider("Image Resize (%)",   20, 100,  80 if st.session_state.use_gpu else 60,  10)
 
     st.divider()
-    start_btn = st.button("Start Analysis", width='stretch', type="primary")
-    stop_btn  = st.button("Stop",           width='stretch')
-    if st.button("Clear All Logs", width='stretch'):
-        st.session_state.analysis_log            = []
-        st.session_state.summary_text            = ""
-        st.session_state.search_results          = []
-        st.session_state.highlights              = []
-        st.session_state.total_frames_analyzed   = 0
+
+    # Generation Parameters
+    st.markdown("<div class='section-label'>Generation Parameters</div>", unsafe_allow_html=True)
+    top_k = st.slider("Top-k", 1, 100, 40, 5)
+
+    st.divider()
+
+    # Prompt Preset
+    st.markdown("<div class='section-label'>Prompt Preset</div>", unsafe_allow_html=True)
+    preset_name = st.selectbox("Preset", list(PROMPT_PRESETS.keys()),
+                               label_visibility="collapsed")
+    if st.button("Apply Preset"):
+        st.session_state.pending_prompt = PROMPT_PRESETS[preset_name]
+
+    custom_prompt = st.text_area("Custom Prompt", value=st.session_state.current_prompt,
+                                 height=120, key="prompt_input")
+    if custom_prompt != st.session_state.current_prompt:
+        st.session_state.current_prompt = custom_prompt
+    if st.session_state.pending_prompt:
+        st.session_state.current_prompt = st.session_state.pending_prompt
+        st.session_state.pending_prompt = None
         st.rerun()
+
+# ─────────────────────────────────────────────
+# ステータスバー
+# ─────────────────────────────────────────────
+_compute_mode_str = "GPU" if st.session_state.use_gpu else "CPU"
+_latest_latency   = "—"
+if st.session_state.perf_history:
+    _latest_latency = f"{st.session_state.perf_history[-1]['latency']:.2f}s"
+
+status_ph = st.empty()
+status_ph.markdown(
+    make_status_bar(
+        "READY" if not st.session_state.processing else "ANALYZING",
+        _latest_latency,
+        st.session_state.total_frames_analyzed,
+        ALL_VISION_MODELS.get(st.session_state.selected_model, {}).get("display", "—"),
+        "ON" if st.session_state.det_v1_enabled else "OFF",
+        "ON" if st.session_state.det_v2_enabled else "OFF",
+        _compute_mode_str,
+    ),
+    unsafe_allow_html=True,
+)
 
 # ─────────────────────────────────────────────
 # メインタブ
 # ─────────────────────────────────────────────
-tab_live, tab_search, tab_summary, tab_highlight, tab_log = st.tabs([
-    "LIVE DETECTION", "VIDEO SEARCH", "SUMMARIZATION", "HIGHLIGHTS", "ANALYSIS LOG",
+tab_live, tab_search, tab_summary, tab_highlights, tab_log, tab_perf = st.tabs([
+    "LIVE DETECTION", "VIDEO SEARCH", "SUMMARIZATION", "HIGHLIGHTS", "ANALYSIS LOG", "PERFORMANCE"
 ])
 
-# ════════════════════════════════════════════
-# タブ1: LIVE DETECTION（並列処理メインループ）
-# ════════════════════════════════════════════
+# ────────────────────────────────────────────────────────────
+# TAB: LIVE DETECTION
+# ────────────────────────────────────────────────────────────
 with tab_live:
+    ctrl_col, info_col = st.columns([1, 2])
 
-    with st.expander("Analysis Prompt", expanded=True):
-        # ウィジェット生成「前」に pending_prompt を current_prompt に反映する
-        # （生成後に key 付き state を書き換えると Streamlit が例外を出すため）
-        if st.session_state.get("pending_prompt"):
-            st.session_state.current_prompt = st.session_state.pending_prompt
-            st.session_state.pending_prompt = None
+    with ctrl_col:
+        st.markdown("<div class='panel-title'>Controls</div>", unsafe_allow_html=True)
 
-        _pc1, _pc2 = st.columns([3, 1])
-        with _pc1:
-            edited_prompt = st.text_area(
-                "Prompt (editable)",
-                value=st.session_state.current_prompt,
-                height=110,
-                # key を持たせない → value= が毎 rerun で正しく反映される
-            )
-            if edited_prompt != st.session_state.current_prompt:
-                st.session_state.current_prompt = edited_prompt
-        with _pc2:
-            st.markdown(
-                "<div style='font-family:Orbitron,monospace;font-size:0.65rem;color:#1a6a88;"
-                "letter-spacing:0.1em;margin-top:4px;margin-bottom:6px;'>PRESETS</div>",
-                unsafe_allow_html=True,
-            )
-            preset_sel = st.selectbox(
-                "Prompt Presets",
-                options=list(PROMPT_PRESETS.keys()),
-                label_visibility="collapsed",
-                key="preset_sel",
-            )
-            if st.button("Apply", width='stretch'):
-                # pending_prompt に保存 → rerun → ウィジェット生成「前」に適用
-                # （生成後に key 付き state を書き換えると Streamlit が例外を出すため）
-                st.session_state.pending_prompt = PROMPT_PRESETS[preset_sel]
-                st.rerun()
+        btn_col1, btn_col2 = st.columns(2)
+        with btn_col1:
+            start_btn = st.button("▶ START", type="primary",
+                                  disabled=st.session_state.processing)
+        with btn_col2:
+            stop_btn = st.button("■ STOP",
+                                 disabled=not st.session_state.processing)
 
-    # ステータスバー（注釈サイズ）
-    _status_ph = st.empty()
-    _mdisplay  = ALL_VISION_MODELS.get(st.session_state.selected_model, {}).get(
-                     "display", st.session_state.selected_model)
-    _status_ph.markdown(
-        make_status_bar("STANDBY", "---", st.session_state.total_frames_analyzed,
-                        _mdisplay, 0, 0),
-        unsafe_allow_html=True,
-    )
+        if stop_btn:
+            st.session_state.processing = False
 
-    st.markdown("<div style='margin:4px 0 8px;border-top:1px solid #0a2a3e;'></div>",
-                unsafe_allow_html=True)
-
-    # ── 3カラムレイアウト: 映像 | 検知結果 | VLM説明 ──
-    vcol, dcol, rcol = st.columns([3, 1.5, 1.5])
-
-    with vcol:
-        st.markdown("<div class='section-label'>Video Feed + Detection Overlay</div>",
-                    unsafe_allow_html=True)
-        video_ph  = st.empty()
-        vcap_info = st.empty()
-
-    with dcol:
-        # 有効なモデルに応じてヘッダーを動的生成
-        _v1_label = (f"<span style='color:#00c8e6;'>RT-DETR</span>"
-                     if st.session_state.det_v1_enabled else
-                     "<span style='color:#1a4050;'>RT-DETR (off)</span>")
-        _v2_label = (f"<span style='color:#50d26e;'>RT-DETRv2</span>"
-                     if st.session_state.det_v2_enabled else
-                     "<span style='color:#1a4050;'>RT-DETRv2 (off)</span>")
-        st.markdown(
-            f"<div class='section-label'>{_v1_label} &nbsp;+&nbsp; {_v2_label}</div>",
-            unsafe_allow_html=True,
-        )
-        det_ph = st.empty()
-
-    with rcol:
-        st.markdown("<div class='section-label'>AI Scene Analysis (JPN)</div>",
-                    unsafe_allow_html=True)
-        result_ph = st.empty()
-
-    status_ph = st.empty()
-
-    # ════════════════════════════════════════
-    # 並列処理ループ起動
-    # ════════════════════════════════════════
-    if start_btn:
-        use_stream = bool(st.session_state.stream_url)
-        use_file   = bool(st.session_state.video_file
-                          and Path(st.session_state.video_file).exists())
-
-        if not use_stream and not use_file:
-            status_ph.warning("Connect to a stream or prepare a video file first.")
+        # 入力ソースチェック
+        _source_ready = False
+        if st.session_state.mode == "YouTube" and st.session_state.video_file:
+            st.info(f"📹 {Path(st.session_state.video_file).name}")
+            _source_ready = True
+        elif st.session_state.mode == "Live" and st.session_state.stream_url:
+            st.info(f"📡 LIVE: {st.session_state.stream_title[:30]}")
+            _source_ready = True
+        elif st.session_state.mode == "Local" and st.session_state.video_file:
+            st.info(f"📁 {Path(st.session_state.video_file).name}")
+            _source_ready = True
         else:
-            st.session_state.processing = True
-            cap_src = st.session_state.stream_url if use_stream else st.session_state.video_file
-            cap = cv2.VideoCapture(cap_src)
-            if use_stream:
-                cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+            st.warning("⚠️ Input source not ready")
 
-            if not cap.isOpened():
-                status_ph.error("Cannot open video / stream.")
-                st.session_state.processing = False
-            else:
-                fps          = cap.get(cv2.CAP_PROP_FPS) or 30
-                total_fr     = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-                is_stream    = use_stream or (total_fr <= 0)
-                end_frame    = min(int(playback_dur * fps), total_fr) if not is_stream else None
+        if st.button("🗑 Clear Log"):
+            st.session_state.analysis_log         = []
+            st.session_state.total_frames_analyzed = 0
+            st.session_state.highlights            = []
+            st.session_state.perf_history          = []
+            st.rerun()
 
-                current_prompt = st.session_state.current_prompt
-                current_model  = st.session_state.selected_model
-                use_v1         = st.session_state.det_v1_enabled
-                use_v2         = st.session_state.det_v2_enabled
+    with info_col:
+        st.markdown("<div class='panel-title'>Live Feed</div>", unsafe_allow_html=True)
+        frame_ph   = st.empty()
+        det_info_ph = st.empty()
 
-                # ── スレッド間共有辞書 ──
-                shared = {
-                    "running":          True,
-                    "vlm_busy":         False, "vlm_frame": None,
-                    "vlm_pos":          0.0,   "vlm_ts":    "",
-                    "vlm_result":       None,  "vlm_ready": False,
-                    "vlm_last_t":       0.0,
-                    "det_busy":         False, "det_frame": None,
-                    "det_result":       None,  "det_ready": False,
-                    "det_last_t":       0.0,
-                    "latest_det":       {"v1": [], "v2": []},
-                }
-                lock = threading.Lock()
+    analysis_ph = st.empty()
 
-                # VLM スレッド
-                def vlm_worker():
-                    while shared["running"]:
-                        time.sleep(0.05)
-                        with lock:
-                            if shared["vlm_busy"] or shared["vlm_frame"] is None:
-                                continue
-                            snap = shared["vlm_frame"]
-                            shared["vlm_busy"] = True; shared["vlm_frame"] = None
-                        result = vlm_analyze(snap, current_prompt, current_model,
-                                             resize_pct=img_resize, max_tokens=max_tokens_val)
-                        with lock:
-                            shared["vlm_result"] = result
-                            shared["vlm_ready"]  = True
-                            shared["vlm_busy"]   = False
+    # ── メイン処理ループ ──────────────────────────────────────
+    if start_btn and _source_ready and not st.session_state.processing:
+        st.session_state.processing = True
 
-                # 検知スレッド（v1/v2 選択状態を反映）
-                def det_worker():
-                    while shared["running"]:
-                        time.sleep(0.05)
-                        with lock:
-                            if shared["det_busy"] or shared["det_frame"] is None:
-                                continue
-                            snap = shared["det_frame"]
-                            shared["det_busy"] = True; shared["det_frame"] = None
-                        dr = run_detection(snap, use_v1, use_v2, threshold=det_threshold)
-                        with lock:
-                            shared["det_result"]  = dr
-                            shared["det_ready"]   = True
-                            shared["det_busy"]    = False
-                            shared["latest_det"]  = dr
+        video_source = (st.session_state.stream_url
+                        if st.session_state.mode == "Live"
+                        else st.session_state.video_file)
+        cap = cv2.VideoCapture(video_source)
 
-                # スレッド起動
-                threading.Thread(target=vlm_worker, daemon=True).start()
-                if (use_v1 or use_v2) and DETECTION_AVAILABLE:
-                    threading.Thread(target=det_worker, daemon=True).start()
+        if not cap.isOpened():
+            st.error("Cannot open video source")
+            st.session_state.processing = False
+        else:
+            last_vlm_time = 0.0
+            frame_idx     = 0
+            _use_gpu      = st.session_state.use_gpu
 
-                frame_count = 0
-                start_time  = time.time()
-                vlm_res     = None
+            while st.session_state.processing:
+                ret, frame = cap.read()
+                if not ret:
+                    if st.session_state.mode != "Live":
+                        cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                        continue
+                    break
 
-                # ── メインループ（表示専念）──
-                while st.session_state.processing and cap.isOpened():
-                    if is_stream:
-                        cap.grab(); ret, frame = cap.retrieve()
-                    else:
-                        ret, frame = cap.read()
+                frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                frame_idx += 1
 
-                    if not ret:
-                        if is_stream:
-                            status_ph.warning("Frame read failed — retrying...")
-                            time.sleep(1); continue
-                        else:
-                            cap.set(cv2.CAP_PROP_POS_FRAMES, 0); frame_count = 0
-                            status_ph.success("Loop playback"); continue
+                # RT-DETR 物体検知
+                det_result = run_detection(
+                    frame_rgb,
+                    use_v1=st.session_state.det_v1_enabled,
+                    use_v2=st.session_state.det_v2_enabled,
+                    threshold=det_threshold,
+                    use_gpu=_use_gpu,
+                )
 
-                    if not is_stream and frame_count >= end_frame:
-                        cap.set(cv2.CAP_PROP_POS_FRAMES, 0); frame_count = 0
-                        status_ph.success("Loop playback"); continue
+                st.session_state.last_det_count["v1"] = len(det_result.get("v1", []))
+                st.session_state.last_det_count["v2"] = len(det_result.get("v2", []))
 
-                    frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                    elapsed   = time.time() - start_time
-                    pos_sec   = frame_count / fps if fps > 0 else elapsed
-                    now       = time.time()
+                # ボックス描画
+                annotated = draw_detection_boxes(frame_rgb, {
+                    k: v for k, v in det_result.items() if k in ("v1", "v2")
+                })
+                frame_ph.image(annotated, channels="RGB", use_container_width=True)
 
-                    # VLM 送信トリガー
-                    with lock:
-                        if (not shared["vlm_busy"] and shared["vlm_frame"] is None
-                                and (now - shared["vlm_last_t"]) >= proc_interval):
-                            shared["vlm_frame"]  = frame_rgb.copy()
-                            shared["vlm_pos"]    = round(pos_sec, 1)
-                            shared["vlm_ts"]     = datetime.now().strftime("%H:%M:%S")
-                            shared["vlm_last_t"] = now
+                # 検知結果表示
+                det_html = ""
+                for ver in ("v1", "v2"):
+                    dets = det_result.get(ver, [])
+                    if dets:
+                        cfg = DETECTION_MODELS[ver]
+                        det_html += (f"<div class='det-model-header' style='color:{cfg['color_hex']}'>"
+                                     f"{cfg['label']} — {len(dets)} objects</div>")
+                        for d in dets[:8]:
+                            det_html += (f"<div class='detection-card det-{ver}'>"
+                                         f"<span class='det-label'>{d['label']}</span>"
+                                         f"<span class='det-score'>{d['score']:.2f}</span>"
+                                         f"<span class='det-tag'>[{ver.upper()}]</span>"
+                                         f"</div>")
+                if det_html:
+                    det_info_ph.markdown(det_html, unsafe_allow_html=True)
 
-                    # 検知 送信トリガー
-                    if (use_v1 or use_v2) and DETECTION_AVAILABLE:
-                        with lock:
-                            if (not shared["det_busy"] and shared["det_frame"] is None
-                                    and (now - shared["det_last_t"]) >= det_interval):
-                                shared["det_frame"]  = frame_rgb.copy()
-                                shared["det_last_t"] = now
+                # VLM 分析（インターバル制御）
+                now = time.time()
+                if now - last_vlm_time >= vlm_interval:
+                    last_vlm_time = now
+                    ts_str = datetime.now().strftime("%H:%M:%S")
 
-                    # 最新ボックスをオーバーレイ
-                    with lock:
-                        latest = dict(shared["latest_det"])
-                    if (use_v1 or use_v2) and (latest["v1"] or latest["v2"]):
-                        disp = draw_detection_boxes(frame_rgb, latest)
-                    else:
-                        disp = frame_rgb
-
-                    # フレーム表示（スレッド待ちで止まらない）
-                    video_ph.image(disp, channels="RGB", width='stretch')
-
-                    _busy = shared["vlm_busy"]
-                    _ann  = "  |  Analyzing..." if _busy else ""
-                    if is_stream:
-                        vcap_info.caption(
-                            f"Elapsed {elapsed:.0f}s  |  Frame {frame_count}  |  "
-                            f"{datetime.now().strftime('%H:%M:%S')}{_ann}")
-                    else:
-                        max_s = min(playback_dur, total_fr / fps) if fps > 0 else playback_dur
-                        vcap_info.caption(f"{pos_sec:.1f}s / {max_s:.0f}s  |  Frame {frame_count}{_ann}")
-
-                    # VLM 結果受け取り
-                    with lock:
-                        has_vlm  = shared["vlm_ready"]
-                        vlm_res  = shared["vlm_result"] if has_vlm else vlm_res
-                        saved_ts = shared["vlm_ts"]
-                        saved_ps = shared["vlm_pos"]
-                        if has_vlm:
-                            shared["vlm_ready"] = False
-
-                    if has_vlm and vlm_res:
-                        if vlm_res["ok"]:
-                            st.session_state.total_frames_analyzed += 1
-                            st.session_state.analysis_log.append({
-                                "ts": saved_ts, "frame_idx": frame_count,
-                                "pos_sec": saved_ps, "text": vlm_res["text"],
-                                "img_b64": vlm_res.get("img_b64", ""),
-                                "latency": vlm_res["latency"],
-                            })
-                            result_ph.markdown(
-                                f"<div class='analysis-card'>"
-                                f"<div class='analysis-ts'>{saved_ts}  |  {saved_ps}s</div>"
-                                f"<div class='analysis-body'>{vlm_res['text']}</div>"
-                                f"</div>", unsafe_allow_html=True)
-                        else:
-                            result_ph.error(vlm_res["text"])
-
-                    # 検知結果受け取り & 検知パネル更新
-                    with lock:
-                        has_det = shared["det_ready"]
-                        det_res = shared["det_result"] if has_det else None
-                        if has_det:
-                            shared["det_ready"] = False
-
-                    if has_det and det_res:
-                        v1d = det_res.get("v1", [])
-                        v2d = det_res.get("v2", [])
-                        st.session_state.last_det_count = {"v1": len(v1d), "v2": len(v2d)}
-
-                        det_html = ""
-                        # RT-DETR v1 セクション
-                        if use_v1:
-                            det_html += (
-                                f"<div class='det-model-header' style='color:#00c8e6;'>"
-                                f"RT-DETR  [{len(v1d)} detections]</div>"
-                            )
-                            if v1d:
-                                for d in v1d[:12]:
-                                    det_html += (
-                                        f"<div class='detection-card det-v1'>"
-                                        f"<span class='det-label'>{d['label']}</span>"
-                                        f"<span class='det-score'>{d['score']:.2f}</span>"
-                                        f"</div>"
-                                    )
-                            else:
-                                det_html += "<div style='color:#1a4a5a;font-size:0.7rem;padding:4px 8px;'>No detections</div>"
-
-                        # RT-DETRv2 セクション
-                        if use_v2:
-                            det_html += (
-                                f"<div class='det-model-header' style='color:#50d26e;margin-top:8px;'>"
-                                f"RT-DETRv2  [{len(v2d)} detections]</div>"
-                            )
-                            if v2d:
-                                for d in v2d[:12]:
-                                    det_html += (
-                                        f"<div class='detection-card det-v2'>"
-                                        f"<span class='det-label'>{d['label']}</span>"
-                                        f"<span class='det-score'>{d['score']:.2f}</span>"
-                                        f"</div>"
-                                    )
-                            else:
-                                det_html += "<div style='color:#1a4a5a;font-size:0.7rem;padding:4px 8px;'>No detections</div>"
-
-                        if not det_html:
-                            det_html = "<div style='color:#1a4050;font-size:0.75rem;padding:8px;'>Detection disabled</div>"
-                        det_ph.markdown(det_html, unsafe_allow_html=True)
-
-                    # ステータスバー更新
-                    _vlm_st   = ("ANALYZING" if shared["vlm_busy"] else
-                                 ("READY" if (vlm_res and vlm_res.get("ok")) else "STANDBY"))
-                    _lat_str  = (f"{vlm_res['latency']:.1f}s"
-                                 if (vlm_res and vlm_res.get("ok")) else "---")
-                    _status_ph.markdown(
-                        make_status_bar(
-                            _vlm_st, _lat_str,
-                            st.session_state.total_frames_analyzed,
-                            ALL_VISION_MODELS.get(current_model, {}).get("display", current_model),
-                            st.session_state.last_det_count["v1"],
-                            st.session_state.last_det_count["v2"],
-                        ), unsafe_allow_html=True)
-
-                    frame_count += 1
-                    time.sleep(0.067 if is_stream else 0.05)
-
-                    if stop_btn or not st.session_state.processing:
-                        break
-
-                with lock:
-                    shared["running"] = False
-                cap.release()
-                st.session_state.processing = False
-                status_ph.info("Analysis stopped")
-
-    if stop_btn:
-        st.session_state.processing = False
-
-# ════════════════════════════════════════════
-# タブ2: VIDEO SEARCH（自動タグ付け＋キーワード検索）
-# ════════════════════════════════════════════
-with tab_search:
-    st.markdown("<div class='panel-title'>Video Search</div>", unsafe_allow_html=True)
-    st.caption("Auto-extracted tags from analysis log — click to filter frames")
-
-    if not st.session_state.analysis_log:
-        st.info("Run a live analysis first — tags and results will appear here.")
-    else:
-        st.success(f"Analyzed frames: **{len(st.session_state.analysis_log)}**")
-
-        # ── 自動タグ抽出・表示 ──────────────────────────────────
-        auto_tags = extract_tags(st.session_state.analysis_log, top_n=50)
-        if auto_tags:
-            st.markdown(
-                "<div style='font-family:Orbitron,monospace;font-size:0.65rem;"
-                "color:#2a6a88;letter-spacing:0.12em;margin-bottom:6px;'>AUTO TAGS</div>",
-                unsafe_allow_html=True,
-            )
-            # タグをボタン風に横並び表示
-            # クリックで search_query に反映
-            _tag_cols = st.columns(min(len(auto_tags), 8))
-            for _i, _tag in enumerate(auto_tags[:40]):
-                with _tag_cols[_i % 8]:
-                    if st.button(
-                        _tag,
-                        key=f"tag_{_i}_{_tag}",
-                        width='stretch',
-                    ):
-                        st.session_state.search_query = _tag
-                        st.session_state.search_results = search_analysis_log(
-                            st.session_state.analysis_log, _tag)
-                        st.rerun()
-
-        st.markdown("<div style='margin:8px 0 4px;border-top:1px solid #0a2a3e;'></div>",
-                    unsafe_allow_html=True)
-
-        # ── キーワード手入力検索 ────────────────────────────────
-        _sc1, _sc2 = st.columns([4, 1])
-        with _sc1:
-            search_q = st.text_input(
-                "Search Query",
-                value=st.session_state.search_query,
-                placeholder="keyword  (or click a tag above)",
-                help="Space / comma separated — OR search",
-                key="search_input",
-            )
-        with _sc2:
-            st.markdown("<br>", unsafe_allow_html=True)
-            do_search = st.button("Search", width='stretch', type="primary")
-
-        if do_search or (search_q != st.session_state.search_query):
-            st.session_state.search_query   = search_q
-            st.session_state.search_results = search_analysis_log(
-                st.session_state.analysis_log, search_q)
-
-        # ── 検索結果表示 ────────────────────────────────────────
-        if st.session_state.search_results:
-            st.markdown(f"**{len(st.session_state.search_results)} frames matched**")
-            for entry in st.session_state.search_results:
-                _e1, _e2 = st.columns([1, 3])
-                with _e1:
-                    if entry.get("img_b64"):
-                        st.image(
-                            base64.b64decode(entry["img_b64"]),
-                            caption=f"{entry['pos_sec']}s",
-                            width='stretch',
-                        )
-                with _e2:
-                    st.markdown(
-                        f"<div class='analysis-card'>"
-                        f"<div class='analysis-ts'>"
-                        f"{entry['ts']}  |  Frame {entry['frame_idx']}  ({entry['pos_sec']}s)"
-                        f"</div>"
-                        f"<div class='analysis-body'>"
-                        f"{highlight_text(entry['text'], st.session_state.search_query)}"
-                        f"</div>"
-                        f"</div>",
+                    status_ph.markdown(
+                        make_status_bar("ANALYZING", "...", st.session_state.total_frames_analyzed,
+                                        ALL_VISION_MODELS.get(st.session_state.selected_model, {}).get("display", "—"),
+                                        "ON" if st.session_state.det_v1_enabled else "OFF",
+                                        "ON" if st.session_state.det_v2_enabled else "OFF",
+                                        _compute_mode_str),
                         unsafe_allow_html=True,
                     )
-        elif st.session_state.search_query:
-            st.warning("No matching frames found.")
 
-# ════════════════════════════════════════════
-# タブ3: SUMMARIZATION
-# ════════════════════════════════════════════
+                    result = vlm_analyze(
+                        frame_rgb,
+                        st.session_state.current_prompt,
+                        st.session_state.selected_model,
+                        resize_pct=resize_pct,
+                        max_tokens=max_tokens,
+                        use_gpu=_use_gpu,
+                    )
+
+                    lat_str = f"{result['latency']:.2f}s"
+
+                    # パフォーマンス履歴記録
+                    st.session_state.perf_history.append({
+                        "mode":    "GPU" if _use_gpu else "CPU",
+                        "latency": result["latency"],
+                        "ts":      ts_str,
+                        "model":   st.session_state.selected_model,
+                    })
+                    # 直近100件のみ保持
+                    if len(st.session_state.perf_history) > 100:
+                        st.session_state.perf_history = st.session_state.perf_history[-100:]
+
+                    if result["ok"]:
+                        entry = {
+                            "ts":        ts_str,
+                            "frame_idx": frame_idx,
+                            "text":      result["text"],
+                            "img_b64":   result.get("img_b64", ""),
+                            "latency":   result["latency"],
+                            "model":     st.session_state.selected_model,
+                            "device":    result.get("device", _compute_mode_str),
+                        }
+                        st.session_state.analysis_log.append(entry)
+                        st.session_state.total_frames_analyzed += 1
+                        st.session_state.highlights = detect_highlights(st.session_state.analysis_log)
+
+                        analysis_ph.markdown(
+                            f"<div class='analysis-card'>"
+                            f"<div class='analysis-ts'>[{ts_str}] Frame {frame_idx} "
+                            f"| {lat_str} | {result.get('device', _compute_mode_str)}</div>"
+                            f"<div class='analysis-body'>{result['text']}</div>"
+                            f"</div>",
+                            unsafe_allow_html=True,
+                        )
+                    else:
+                        analysis_ph.error(result["text"])
+
+                    status_ph.markdown(
+                        make_status_bar("OK", lat_str, st.session_state.total_frames_analyzed,
+                                        ALL_VISION_MODELS.get(st.session_state.selected_model, {}).get("display", "—"),
+                                        "ON" if st.session_state.det_v1_enabled else "OFF",
+                                        "ON" if st.session_state.det_v2_enabled else "OFF",
+                                        _compute_mode_str),
+                        unsafe_allow_html=True,
+                    )
+
+                time.sleep(0.03)  # ~30fps 表示レート
+
+            cap.release()
+            st.session_state.processing = False
+
+# ────────────────────────────────────────────────────────────
+# TAB: VIDEO SEARCH
+# ────────────────────────────────────────────────────────────
+with tab_search:
+    st.markdown("<div class='panel-title'>Search Analysis Log</div>", unsafe_allow_html=True)
+
+    tags = extract_tags(st.session_state.analysis_log)
+    if tags:
+        st.markdown("**Auto Tags:**")
+        tag_cols = st.columns(min(len(tags), 8))
+        for i, tag in enumerate(tags[:8]):
+            with tag_cols[i % 8]:
+                if st.button(tag, key=f"tag_{i}"):
+                    st.session_state.search_query   = tag
+                    st.session_state.search_results = search_analysis_log(
+                        st.session_state.analysis_log, tag)
+
+    query = st.text_input("Search Query", value=st.session_state.search_query,
+                          placeholder="キーワードを入力 (スペース区切りでAND検索)")
+    if query != st.session_state.search_query:
+        st.session_state.search_query   = query
+        st.session_state.search_results = search_analysis_log(
+            st.session_state.analysis_log, query)
+
+    if st.session_state.search_results:
+        st.info(f"{len(st.session_state.search_results)} results found")
+        for entry in st.session_state.search_results:
+            st.markdown(
+                f"<div class='analysis-card'>"
+                f"<div class='analysis-ts'>[{entry['ts']}] Frame {entry['frame_idx']}"
+                f" | {entry.get('device', '—')}</div>"
+                f"<div class='analysis-body'>"
+                f"{highlight_text(entry['text'], st.session_state.search_query)}"
+                f"</div></div>",
+                unsafe_allow_html=True,
+            )
+    elif st.session_state.search_query:
+        st.info("No results found")
+
+# ────────────────────────────────────────────────────────────
+# TAB: SUMMARIZATION
+# ────────────────────────────────────────────────────────────
 with tab_summary:
     st.markdown("<div class='panel-title'>Video Summarization</div>", unsafe_allow_html=True)
-    st.caption("AI integrates all frame analyses into a comprehensive report")
-    if not st.session_state.analysis_log:
-        st.info("Run a live analysis first.")
-    else:
-        st.info(f"Source data: **{len(st.session_state.analysis_log)} frames** analyzed")
-        _sm1, _sm2 = st.columns([2, 1])
-        with _sm1:
-            sum_model = st.selectbox("Summarization Model", options=list(TEXT_MODELS.keys()))
-        with _sm2:
-            st.markdown("<br>", unsafe_allow_html=True)
-            gen_summary = st.button("Generate Summary", width='stretch', type="primary")
-        if gen_summary:
-            with st.spinner(f"Generating from {len(st.session_state.analysis_log)} frames..."):
-                res = nim_text_summarize(st.session_state.analysis_log, sum_model)
-                if res["ok"]:
-                    st.session_state.summary_text = res["text"]
-                    st.success(f"Done ({res['latency']:.1f}s)")
+
+    sum_model = st.selectbox("Text Model", list(TEXT_MODELS.keys()))
+    if st.button("Generate Summary", type="primary"):
+        if st.session_state.analysis_log:
+            with st.spinner("Generating summary..."):
+                result = nim_text_summarize(st.session_state.analysis_log, sum_model)
+                if result["ok"]:
+                    st.session_state.summary_text = result["text"]
                 else:
-                    st.error(f"Failed: {res['text']}")
-        if st.session_state.summary_text:
-            st.markdown("---")
-            st.markdown("<div class='panel-title'>Summary Report</div>", unsafe_allow_html=True)
-            st.markdown(
-                f"<div style='background:#020f1f;border:1px solid #0a3055;"
-                f"border-left:3px solid #00b4d8;border-radius:3px;padding:18px;"
-                f"color:#b0cce0;line-height:1.7;'>"
-                f"{st.session_state.summary_text.replace(chr(10), '<br>')}</div>",
-                unsafe_allow_html=True)
-            st.download_button("Download Summary", data=st.session_state.summary_text,
-                               file_name=f"summary_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
-                               mime="text/plain")
+                    st.error(result["text"])
+        else:
+            st.warning("No analysis log to summarize")
 
-# ════════════════════════════════════════════
-# タブ4: HIGHLIGHTS
-# ════════════════════════════════════════════
-with tab_highlight:
-    st.markdown("<div class='panel-title'>Highlight Detection</div>", unsafe_allow_html=True)
-    st.caption("Auto-extracts frames with highest information density")
-    if not st.session_state.analysis_log:
-        st.info("Run a live analysis first.")
+    if st.session_state.summary_text:
+        st.markdown(
+            f"<div class='analysis-card'>"
+            f"<div class='analysis-body'>{st.session_state.summary_text}</div>"
+            f"</div>",
+            unsafe_allow_html=True,
+        )
+        st.download_button("📥 Download Summary",
+                           data=st.session_state.summary_text,
+                           file_name="summary.txt", mime="text/plain")
+
+# ────────────────────────────────────────────────────────────
+# TAB: HIGHLIGHTS
+# ────────────────────────────────────────────────────────────
+with tab_highlights:
+    st.markdown("<div class='panel-title'>Auto Highlights</div>", unsafe_allow_html=True)
+
+    if st.session_state.highlights:
+        for i, entry in enumerate(st.session_state.highlights):
+            cols = st.columns([1, 2])
+            with cols[0]:
+                if entry.get("img_b64"):
+                    try:
+                        img_data = base64.b64decode(entry["img_b64"])
+                        img      = Image.open(io.BytesIO(img_data))
+                        st.image(img, use_container_width=True)
+                    except Exception:
+                        st.info("No image")
+            with cols[1]:
+                st.markdown(
+                    f"<div class='analysis-card'>"
+                    f"<div class='analysis-ts'>#{i+1} [{entry['ts']}] Frame {entry['frame_idx']}"
+                    f" | {entry.get('device', '—')}</div>"
+                    f"<div class='analysis-body'>{entry['text'][:300]}</div>"
+                    f"</div>",
+                    unsafe_allow_html=True,
+                )
     else:
-        top_n = st.slider("Number of highlights", 1, min(10, len(st.session_state.analysis_log)), 5)
-        if st.button("Extract Highlights", width='stretch', type="primary"):
-            st.session_state.highlights = detect_highlights(st.session_state.analysis_log, top_n)
-        if st.session_state.highlights:
-            st.markdown(f"**Top {len(st.session_state.highlights)} scenes**")
-            for i, entry in enumerate(st.session_state.highlights, 1):
-                with st.expander(f"Highlight #{i}  —  {entry['ts']}  ({entry['pos_sec']}s)",
-                                 expanded=(i == 1)):
-                    _h1, _h2 = st.columns([1, 2])
-                    with _h1:
-                        if entry.get("img_b64"):
-                            st.image(base64.b64decode(entry["img_b64"]),
-                                     caption=f"Frame {entry['frame_idx']}  |  {entry['pos_sec']}s",
-                                     width='stretch')
-                    with _h2:
-                        st.markdown(entry["text"])
-                        st.caption(f"Latency: {entry.get('latency', 0):.1f}s")
+        st.info("No highlights yet. Start analysis to generate highlights.")
 
-# ════════════════════════════════════════════
-# タブ5: ANALYSIS LOG
-# ════════════════════════════════════════════
+# ────────────────────────────────────────────────────────────
+# TAB: ANALYSIS LOG
+# ────────────────────────────────────────────────────────────
 with tab_log:
-    st.markdown("<div class='panel-title'>Analysis Log</div>", unsafe_allow_html=True)
-    if not st.session_state.analysis_log:
-        st.info("No analysis results yet.")
+    st.markdown("<div class='panel-title'>Full Analysis Log</div>", unsafe_allow_html=True)
+
+    if st.session_state.analysis_log:
+        st.info(f"Total: {len(st.session_state.analysis_log)} entries")
+
+        if st.button("📥 Export JSON"):
+            json_str = json.dumps(
+                [{k: v for k, v in e.items() if k != "img_b64"}
+                 for e in st.session_state.analysis_log],
+                ensure_ascii=False, indent=2
+            )
+            st.download_button("Download JSON", data=json_str,
+                               file_name="analysis_log.json", mime="application/json")
+
+        for entry in reversed(st.session_state.analysis_log[-50:]):
+            st.markdown(
+                f"<div class='analysis-card'>"
+                f"<div class='analysis-ts'>[{entry['ts']}] Frame {entry['frame_idx']}"
+                f" | {entry.get('latency', 0):.2f}s | {entry.get('device', '—')}</div>"
+                f"<div class='analysis-body'>{entry['text']}</div>"
+                f"</div>",
+                unsafe_allow_html=True,
+            )
     else:
-        st.markdown(f"**{len(st.session_state.analysis_log)} frames analyzed**")
-        _csv = "timestamp,frame_idx,pos_sec,latency,text\n"
-        for e in st.session_state.analysis_log:
-            _safe = e["text"].replace('"', '""').replace("\n", " ")
-            _csv += f'"{e["ts"]}",{e["frame_idx"]},{e["pos_sec"]},{e.get("latency",0):.2f},"{_safe}"\n'
-        st.download_button("Download CSV Log", data=_csv,
-                           file_name=f"log_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                           mime="text/csv")
-        show_imgs = st.checkbox("Show frame thumbnails", value=False)
-        for entry in reversed(st.session_state.analysis_log):
-            with st.expander(
-                    f"{entry['ts']}  |  {entry['pos_sec']}s  |  Frame {entry['frame_idx']}",
-                    expanded=False):
-                if show_imgs and entry.get("img_b64"):
-                    st.image(base64.b64decode(entry["img_b64"]), width='stretch')
-                st.markdown(entry["text"])
-                st.caption(f"Latency: {entry.get('latency', 0):.1f}s")
+        st.info("No analysis log yet.")
+
+# ────────────────────────────────────────────────────────────
+# TAB: PERFORMANCE（CPU vs GPU 比較）
+# ────────────────────────────────────────────────────────────
+with tab_perf:
+    st.markdown("<div class='panel-title'>CPU vs GPU Performance Comparison</div>", unsafe_allow_html=True)
+
+    if st.session_state.perf_history:
+        gpu_records = [r for r in st.session_state.perf_history if r["mode"] == "GPU"]
+        cpu_records = [r for r in st.session_state.perf_history if r["mode"] == "CPU"]
+
+        m_col1, m_col2, m_col3, m_col4 = st.columns(4)
+        with m_col1:
+            if gpu_records:
+                avg_gpu = sum(r["latency"] for r in gpu_records) / len(gpu_records)
+                st.metric("GPU Avg Latency", f"{avg_gpu:.2f}s", delta=None)
+            else:
+                st.metric("GPU Avg Latency", "—")
+        with m_col2:
+            if cpu_records:
+                avg_cpu = sum(r["latency"] for r in cpu_records) / len(cpu_records)
+                st.metric("CPU Avg Latency", f"{avg_cpu:.2f}s")
+            else:
+                st.metric("CPU Avg Latency", "—")
+        with m_col3:
+            if gpu_records and cpu_records:
+                speedup = avg_cpu / avg_gpu if avg_gpu > 0 else 0
+                st.metric("GPU Speedup", f"{speedup:.1f}×", delta=f"+{speedup-1:.1f}×" if speedup > 1 else None)
+            else:
+                st.metric("GPU Speedup", "—")
+        with m_col4:
+            st.metric("Total Samples", len(st.session_state.perf_history))
+
+        # レイテンシ推移グラフ
+        st.markdown("#### Latency Timeline")
+        import json as _json
+        chart_data_gpu = [[r["ts"], r["latency"]] for r in gpu_records]
+        chart_data_cpu = [[r["ts"], r["latency"]] for r in cpu_records]
+
+        # Streamlit ネイティブチャート用データ
+        import pandas as pd
+        if gpu_records or cpu_records:
+            all_records = []
+            for r in st.session_state.perf_history:
+                all_records.append({
+                    "index": st.session_state.perf_history.index(r),
+                    "latency": r["latency"],
+                    "mode": r["mode"],
+                })
+            df = pd.DataFrame(all_records)
+            gpu_df = df[df["mode"] == "GPU"][["index", "latency"]].rename(columns={"latency": "GPU Latency (s)"})
+            cpu_df = df[df["mode"] == "CPU"][["index", "latency"]].rename(columns={"latency": "CPU Latency (s)"})
+
+            if not gpu_df.empty and not cpu_df.empty:
+                merged = pd.merge(gpu_df, cpu_df, on="index", how="outer").set_index("index")
+                st.line_chart(merged)
+            elif not gpu_df.empty:
+                st.line_chart(gpu_df.set_index("index"))
+            elif not cpu_df.empty:
+                st.line_chart(cpu_df.set_index("index"))
+
+        # 詳細テーブル
+        with st.expander("Raw Performance Data"):
+            st.dataframe(
+                pd.DataFrame(st.session_state.perf_history)[["ts", "mode", "latency", "model"]],
+                use_container_width=True,
+            )
+
+        if st.button("🗑 Clear Performance Data"):
+            st.session_state.perf_history = []
+            st.rerun()
+    else:
+        st.info("パフォーマンスデータがありません。GPU/CPU モードを切り替えながら分析を実行してください。")
+        st.markdown("""
+        **使い方:**
+        1. 右上の **🟢 GPU** モードで分析を開始
+        2. 数フレーム分析したら **■ STOP**
+        3. **🔵 CPU** モードに切り替えて再度 **▶ START**
+        4. このタブでレイテンシを比較
+        """)
 
 # ─────────────────────────────────────────────
 # フッター
 # ─────────────────────────────────────────────
 st.markdown(
     "<div class='vit-footer'>"
-    "VIDEO INTELLIGENCE TERMINAL"
-    " &nbsp;|&nbsp; <span style='color:#005a80;'>NVIDIA NIM</span>"
-    " + <span style='color:#005a80;'>HuggingFace</span>"
-    " + <span style='color:#005a80;'>RT-DETR v1 / v2</span>"
-    " &nbsp;|&nbsp; Parallel Detection Pipeline"
+    "VIDEO INTELLIGENCE TERMINAL &nbsp;|&nbsp; RT-DETR v1+v2 + Ollama VLM "
+    "&nbsp;|&nbsp; GPU: 192.168.11.111 &nbsp;|&nbsp; CISCO AI LAB"
     "</div>",
     unsafe_allow_html=True,
 )
