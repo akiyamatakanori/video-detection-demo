@@ -565,7 +565,7 @@ def load_rtdetr_v2(device: str):
 # ─────────────────────────────────────────────
 # ユーティリティ
 # ─────────────────────────────────────────────
-def frame_to_base64(frame_rgb, quality=85):
+def frame_to_base64(frame_rgb, quality=95):
     buf = io.BytesIO()
     Image.fromarray(frame_rgb).save(buf, format="JPEG", quality=quality)
     return base64.b64encode(buf.getvalue()).decode()
@@ -998,6 +998,11 @@ with tab_live:
                         if st.session_state.mode == "Live"
                         else st.session_state.video_file)
         cap = cv2.VideoCapture(video_source)
+
+        # 高解像度設定（1920x1080を要求）
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH,  1920)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
+        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # バッファ最小化で最新フレームを取得
 
         if not cap.isOpened():
             st.error("動画ソースを開けません")
