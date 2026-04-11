@@ -279,42 +279,16 @@ div[data-testid="stSidebar"] * { color: #8ab8cc !important; }
     color: #2a5a78; letter-spacing: 0.18em; text-transform: uppercase;
 }
 
-/* ── START / STOP ボタン ── */
-div[data-testid="column"]:nth-child(2) .stButton > button {
-    font-family: 'Orbitron', monospace !important;
-    font-size: 0.72rem !important; font-weight: 700 !important;
-    letter-spacing: 0.12em !important;
-    border-radius: 4px !important;
-    padding: 10px 8px !important;
-    background: #020f1f !important;
-    border: 2px solid #00e57a !important;
-    color: #00e57a !important;
-    box-shadow: 0 0 10px rgba(0,229,122,0.2) !important;
-    text-transform: uppercase !important;
-    transition: all 0.15s !important;
-}
-div[data-testid="column"]:nth-child(2) .stButton > button:hover {
-    background: #002a18 !important;
-    box-shadow: 0 0 18px rgba(0,229,122,0.4) !important;
-}
-/* ── GPU ON/OFF ボタン ── */
+/* ── START/STOP・GPU ON/OFFの実ボタンを非表示（Markdown HTMLで代替表示）── */
+div[data-testid="column"]:nth-child(2) .stButton > button,
 div[data-testid="column"]:nth-child(3) .stButton > button {
-    font-family: 'Orbitron', monospace !important;
-    font-size: 0.72rem !important; font-weight: 700 !important;
-    letter-spacing: 0.12em !important;
-    border-radius: 4px !important;
-    padding: 10px 8px !important;
-    background: #020f1f !important;
-    border: 2px solid #00e57a !important;
-    color: #00e57a !important;
-    box-shadow: 0 0 10px rgba(0,229,122,0.2) !important;
-    text-transform: uppercase !important;
-    transition: all 0.15s !important;
+    opacity: 0 !important;
+    height: 0px !important; min-height: 0px !important;
+    padding: 0 !important; margin: -4px 0 0 0 !important;
+    border: none !important; overflow: hidden !important;
+    position: relative !important;
 }
-div[data-testid="column"]:nth-child(3) .stButton > button:hover {
-    background: #002a18 !important;
-    box-shadow: 0 0 18px rgba(0,229,122,0.4) !important;
-}
+
 
 /* ── バナー ── */
 .compute-banner {
@@ -478,41 +452,57 @@ with hdr_col:
     </div>
     """, unsafe_allow_html=True)
 
-# ── START / STOP トグルボタン（1つのみ）──
+# ── START / STOP トグルボタン ──
 with tog_start_col:
-    st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
+    st.markdown("<div style='height:14px'></div>", unsafe_allow_html=True)
     if not st.session_state.processing:
-        if st.button("▶  START", key="start_stop_btn", use_container_width=True):
+        st.markdown("""
+        <div style='font-family:Orbitron,monospace;font-size:0.72rem;font-weight:700;
+            letter-spacing:0.12em;text-align:center;padding:11px 6px;
+            background:#020f1f;border:2px solid #00e57a;border-radius:4px;
+            color:#00e57a;box-shadow:0 0 10px rgba(0,229,122,0.2);cursor:pointer;'>
+            ▶ &nbsp;START</div>
+        """, unsafe_allow_html=True)
+        if st.button("▶ START", key="start_stop_btn", use_container_width=True):
             st.session_state.processing = True
             st.rerun()
     else:
-        st.markdown("""<style>
-        div[data-testid="column"]:nth-child(2) .stButton > button {
-            border-color: #ff3060 !important; color: #ff3060 !important;
-            box-shadow: 0 0 10px rgba(255,48,96,0.25) !important;
-        }
-        </style>""", unsafe_allow_html=True)
-        if st.button("■  STOP", key="start_stop_btn", use_container_width=True):
+        st.markdown("""
+        <div style='font-family:Orbitron,monospace;font-size:0.72rem;font-weight:700;
+            letter-spacing:0.12em;text-align:center;padding:11px 6px;
+            background:#1a0008;border:2px solid #ff3060;border-radius:4px;
+            color:#ff3060;box-shadow:0 0 10px rgba(255,48,96,0.25);cursor:pointer;'>
+            ■ &nbsp;STOP</div>
+        """, unsafe_allow_html=True)
+        if st.button("■ STOP", key="start_stop_btn", use_container_width=True):
             st.session_state.processing = False
             st.rerun()
 
-# ── GPU / CPU トグルボタン（1つのみ）──
+# ── GPU ON/OFF トグルボタン ──
 with tog_gpu_col:
-    st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
+    st.markdown("<div style='height:14px'></div>", unsafe_allow_html=True)
     if st.session_state.use_gpu:
-        if st.button("⚡ GPU  ON", key="gpu_toggle_btn", use_container_width=True):
+        st.markdown("""
+        <div style='font-family:Orbitron,monospace;font-size:0.72rem;font-weight:700;
+            letter-spacing:0.12em;text-align:center;padding:11px 6px;
+            background:#020f1f;border:2px solid #00e57a;border-radius:4px;
+            color:#00e57a;box-shadow:0 0 10px rgba(0,229,122,0.2);cursor:pointer;'>
+            ⚡ GPU &nbsp;ON</div>
+        """, unsafe_allow_html=True)
+        if st.button("⚡ GPU ON", key="gpu_toggle_btn", use_container_width=True):
             st.session_state.use_gpu = False
             st.session_state.selected_model = CPU_DEFAULT_MODEL
             st.cache_resource.clear()
             st.rerun()
     else:
-        st.markdown("""<style>
-        div[data-testid="column"]:nth-child(3) .stButton > button {
-            border-color: #1e4a6a !important; color: #3a8aaa !important;
-            box-shadow: none !important;
-        }
-        </style>""", unsafe_allow_html=True)
-        if st.button("💻 GPU  OFF", key="gpu_toggle_btn", use_container_width=True):
+        st.markdown("""
+        <div style='font-family:Orbitron,monospace;font-size:0.72rem;font-weight:700;
+            letter-spacing:0.12em;text-align:center;padding:11px 6px;
+            background:#080e1a;border:2px solid #1e4a6a;border-radius:4px;
+            color:#3a8aaa;cursor:pointer;'>
+            💻 GPU &nbsp;OFF</div>
+        """, unsafe_allow_html=True)
+        if st.button("💻 GPU OFF", key="gpu_toggle_btn", use_container_width=True):
             st.session_state.use_gpu = True
             st.session_state.selected_model = GPU_DEFAULT_MODEL
             st.cache_resource.clear()
@@ -644,24 +634,44 @@ def run_detection(frame_rgb, use_v1, use_v2, threshold=0.45, device="cpu"):
     return result
 
 def ollama_analyze(frame_rgb, prompt, model_id, resize_pct, max_tokens):
+    """
+    Ollama /api/chat 形式で推論。
+    /api/generate より広いモデル互換性（Llama3.2-Vision 90B, Gemma4 等）を持つ。
+    """
     if resize_pct < 100:
         frame_rgb = resize_frame(frame_rgb, resize_pct)
     img_b64 = frame_to_base64(frame_rgb)
     t0 = time.time()
     try:
+        payload = {
+            "model": model_id,
+            "messages": [{
+                "role": "user",
+                "content": [
+                    {"type": "text",  "text": prompt},
+                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"}},
+                ],
+            }],
+            "stream": False,
+            "options": {"num_predict": max_tokens, "temperature": 0.2},
+        }
         resp = requests.post(
-            f"{OLLAMA_URL}/api/generate",
-            json={"model": model_id, "prompt": prompt, "images": [img_b64],
-                  "stream": False, "options": {"num_predict": max_tokens, "temperature": 0.2}},
-            timeout=300, verify=False)
+            f"{OLLAMA_URL}/api/chat",
+            json=payload, timeout=300, verify=False)
         lat = time.time() - t0
         if resp.status_code == 200:
-            return {"ok": True,  "text": resp.json().get("response",""), "latency": lat, "img_b64": img_b64}
+            data = resp.json()
+            text = (data.get("message", {}).get("content", "")
+                    or data.get("response", ""))
+            return {"ok": True, "text": text, "latency": lat, "img_b64": img_b64}
         if resp.status_code == 404:
             return {"ok": False, "text": f"モデル未インストール: ollama pull {model_id}", "latency": lat}
-        return {"ok": False, "text": f"Ollama HTTP {resp.status_code}", "latency": lat}
+        return {"ok": False, "text": f"Ollama HTTP {resp.status_code}: {resp.text[:200]}", "latency": lat}
     except requests.exceptions.ConnectionError:
         return {"ok": False, "text": f"Ollama 接続失敗 ({OLLAMA_URL})\nollama serve を確認してください",
+                "latency": time.time()-t0}
+    except requests.exceptions.Timeout:
+        return {"ok": False, "text": f"Ollama タイムアウト (300s) — モデルが大きすぎる可能性があります",
                 "latency": time.time()-t0}
     except Exception as exc:
         return {"ok": False, "text": f"Ollama エラー: {exc}", "latency": time.time()-t0}
