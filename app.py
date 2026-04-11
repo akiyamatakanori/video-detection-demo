@@ -279,76 +279,37 @@ div[data-testid="stSidebar"] * { color: #8ab8cc !important; }
     color: #2a5a78; letter-spacing: 0.18em; text-transform: uppercase;
 }
 
-/* START トグル（緑） */
-.toggle-start {
-    display: flex; align-items: center; justify-content: center;
-    gap: 8px; padding: 10px 20px; border-radius: 30px; cursor: pointer;
-    font-family: 'Orbitron', monospace; font-size: 0.78rem; font-weight: 900;
-    letter-spacing: 0.14em; text-transform: uppercase;
-    background: linear-gradient(135deg, #003a20, #005a30);
-    border: 2px solid #00e57a;
-    color: #00e57a;
-    box-shadow: 0 0 18px rgba(0,229,122,0.35), inset 0 0 15px rgba(0,229,122,0.06);
-    text-shadow: 0 0 10px rgba(0,229,122,0.7);
-    animation: pulse-green 2.4s ease-in-out infinite;
+/* ── START / STOP ボタン ── */
+div[data-testid="column"]:nth-child(2) .stButton > button {
+    font-family: 'Orbitron', monospace !important;
+    font-size: 0.8rem !important; font-weight: 900 !important;
+    letter-spacing: 0.12em !important; border-radius: 30px !important;
+    padding: 10px 8px !important;
+    background: linear-gradient(135deg, #003a20, #005a30) !important;
+    border: 2px solid #00e57a !important; color: #00e57a !important;
+    box-shadow: 0 0 16px rgba(0,229,122,0.3) !important;
+    text-shadow: 0 0 8px rgba(0,229,122,0.6) !important;
+    animation: pulse-green 2.4s ease-in-out infinite !important;
 }
-/* STOP トグル（赤） */
-.toggle-stop {
-    display: flex; align-items: center; justify-content: center;
-    gap: 8px; padding: 10px 20px; border-radius: 30px; cursor: pointer;
-    font-family: 'Orbitron', monospace; font-size: 0.78rem; font-weight: 900;
-    letter-spacing: 0.14em; text-transform: uppercase;
-    background: linear-gradient(135deg, #3a0010, #5a0018);
-    border: 2px solid #ff3060;
-    color: #ff3060;
-    box-shadow: 0 0 18px rgba(255,48,96,0.35), inset 0 0 15px rgba(255,48,96,0.06);
-    text-shadow: 0 0 10px rgba(255,48,96,0.7);
-    animation: pulse-red 1.2s ease-in-out infinite;
+/* STOP状態（処理中）*/
+div[data-testid="column"]:nth-child(2) .stButton > button:has(div:contains("STOP")),
+div[data-testid="column"]:nth-child(2) .stButton > button[data-active="true"] {
+    background: linear-gradient(135deg, #3a0010, #5a0018) !important;
+    border: 2px solid #ff3060 !important; color: #ff3060 !important;
+    box-shadow: 0 0 16px rgba(255,48,96,0.35) !important;
+    text-shadow: 0 0 8px rgba(255,48,96,0.7) !important;
+    animation: pulse-red 1.2s ease-in-out infinite !important;
 }
-/* GPU ON トグル（緑発光） */
-.toggle-gpu-on {
-    display: flex; align-items: center; justify-content: center;
-    gap: 8px; padding: 10px 18px; border-radius: 30px;
-    font-family: 'Orbitron', monospace; font-size: 0.75rem; font-weight: 900;
-    letter-spacing: 0.12em; text-transform: uppercase;
-    background: linear-gradient(135deg, #002a18, #004a28);
-    border: 2px solid #00e57a;
-    color: #00e57a;
-    box-shadow: 0 0 16px rgba(0,229,122,0.3), inset 0 0 12px rgba(0,229,122,0.05);
-    text-shadow: 0 0 8px rgba(0,229,122,0.6);
-}
-/* GPU OFF トグル（グレーブルー） */
-.toggle-gpu-off {
-    display: flex; align-items: center; justify-content: center;
-    gap: 8px; padding: 10px 18px; border-radius: 30px;
-    font-family: 'Orbitron', monospace; font-size: 0.75rem; font-weight: 900;
-    letter-spacing: 0.12em; text-transform: uppercase;
-    background: linear-gradient(135deg, #080e1a, #0e1c30);
-    border: 2px solid #1e4a6a;
-    color: #3a8aaa;
-    box-shadow: 0 0 8px rgba(30,74,106,0.2);
-}
-
-/* パルスアニメ */
-@keyframes pulse-green {
-    0%,100% { box-shadow: 0 0 18px rgba(0,229,122,0.35), inset 0 0 15px rgba(0,229,122,0.06); }
-    50%      { box-shadow: 0 0 28px rgba(0,229,122,0.6), inset 0 0 20px rgba(0,229,122,0.1); }
-}
-@keyframes pulse-red {
-    0%,100% { box-shadow: 0 0 18px rgba(255,48,96,0.35), inset 0 0 15px rgba(255,48,96,0.06); }
-    50%      { box-shadow: 0 0 32px rgba(255,48,96,0.7), inset 0 0 22px rgba(255,48,96,0.12); }
-}
-
-/* Streamlit ボタン（トグル下の実ボタンを最小化） */
-.toggle-btn-hidden > div[data-testid="stButton"] > button {
-    background: transparent !important;
-    border: none !important;
-    color: transparent !important;
-    font-size: 0 !important;
-    padding: 0 !important;
-    height: 0 !important;
-    min-height: 0 !important;
-    overflow: hidden !important;
+/* ── GPU / CPU ボタン ── */
+div[data-testid="column"]:nth-child(3) .stButton > button {
+    font-family: 'Orbitron', monospace !important;
+    font-size: 0.78rem !important; font-weight: 900 !important;
+    letter-spacing: 0.1em !important; border-radius: 30px !important;
+    padding: 10px 8px !important;
+    background: linear-gradient(135deg, #002a18, #004a28) !important;
+    border: 2px solid #00e57a !important; color: #00e57a !important;
+    box-shadow: 0 0 14px rgba(0,229,122,0.25) !important;
+    text-shadow: 0 0 6px rgba(0,229,122,0.5) !important;
 }
 
 /* ── バナー ── */
@@ -513,38 +474,30 @@ with hdr_col:
     </div>
     """, unsafe_allow_html=True)
 
-# ── START / STOP トグルボタン ──
+# ── START / STOP トグルボタン（1つのみ）──
 with tog_start_col:
-    st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
-    st.markdown("<div class='toggle-label' style='text-align:center'>▌ DETECTION</div>",
-                unsafe_allow_html=True)
+    st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
     if not st.session_state.processing:
-        st.markdown("<div class='toggle-start'>▶&nbsp;START</div>", unsafe_allow_html=True)
-        if st.button("▶ START", key="start_stop_btn", use_container_width=True):
+        if st.button("▶  START", key="start_stop_btn", use_container_width=True):
             st.session_state.processing = True
             st.rerun()
     else:
-        st.markdown("<div class='toggle-stop'>■&nbsp;STOP</div>", unsafe_allow_html=True)
-        if st.button("■ STOP", key="start_stop_btn", use_container_width=True):
+        if st.button("■  STOP", key="start_stop_btn", use_container_width=True):
             st.session_state.processing = False
             st.rerun()
 
-# ── GPU / CPU トグルボタン ──
+# ── GPU / CPU トグルボタン（1つのみ）──
 with tog_gpu_col:
-    st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
-    st.markdown("<div class='toggle-label' style='text-align:center'>⚡ COMPUTE</div>",
-                unsafe_allow_html=True)
+    st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
     if st.session_state.use_gpu:
-        st.markdown("<div class='toggle-gpu-on'>⚡&nbsp;GPU</div>", unsafe_allow_html=True)
-        if st.button("→ CPU モードへ", key="gpu_toggle_btn", use_container_width=True):
-            st.session_state.use_gpu    = False
+        if st.button("⚡ GPU  ON", key="gpu_toggle_btn", use_container_width=True):
+            st.session_state.use_gpu = False
             st.session_state.selected_model = CPU_DEFAULT_MODEL
             st.cache_resource.clear()
             st.rerun()
     else:
-        st.markdown("<div class='toggle-gpu-off'>💻&nbsp;CPU</div>", unsafe_allow_html=True)
-        if st.button("→ GPU モードへ", key="gpu_toggle_btn", use_container_width=True):
-            st.session_state.use_gpu    = True
+        if st.button("💻 GPU  OFF", key="gpu_toggle_btn", use_container_width=True):
+            st.session_state.use_gpu = True
             st.session_state.selected_model = GPU_DEFAULT_MODEL
             st.cache_resource.clear()
             st.rerun()
