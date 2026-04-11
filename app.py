@@ -85,8 +85,8 @@ NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY", "")
 HF_TOKEN       = os.getenv("HF_TOKEN", "")
 NIM_BASE_URL   = os.getenv("NIM_BASE_URL", "https://integrate.api.nvidia.com/v1")
 
-# Ollama: GPUサーバーと同居のため localhost
-OLLAMA_URL = "http://localhost:11434"
+# Ollama: GPUサーバー (192.168.11.111) に接続
+OLLAMA_URL = "http://192.168.11.111:11434"
 
 _ca_bundle = os.getenv("REQUESTS_CA_BUNDLE", "")
 SSL_VERIFY = _ca_bundle if _ca_bundle else False
@@ -487,8 +487,8 @@ for _k, _v in _defaults.items():
 # デバイス判定
 # ─────────────────────────────────────────────
 def get_device(use_gpu: bool) -> str:
-    if use_gpu and DETECTION_AVAILABLE and torch.cuda.is_available():
-        return "cuda"
+    # video-ai-demo にはGPUがないため常にCPU
+    # OllamaのVLMはGPUサーバー(192.168.11.111)で処理
     return "cpu"
 
 _mode_str   = "GPU" if st.session_state.use_gpu else "CPU"
@@ -562,11 +562,11 @@ if st.session_state.use_gpu:
     <div class="compute-banner gpu">
       <span style='font-size:1rem'>⚡</span>
       <div>
-        <div class="compute-label-gpu">GPU MODE — NVIDIA H100 ACTIVE</div>
+        <div class="compute-label-gpu">GPU MODE — OLLAMA GPU SERVER ACTIVE</div>
         <div class="compute-detail">
-          RT-DETR: <b>{_device_label}</b> &nbsp;|&nbsp;
-          Ollama: <b>{OLLAMA_URL}</b> &nbsp;|&nbsp;
-          VLM Model: <b>{_model_size}</b>
+          RT-DETR: <b>CPU (video-ai-demo)</b> &nbsp;|&nbsp;
+          Ollama VLM: <b>{OLLAMA_URL}</b> &nbsp;|&nbsp;
+          VLM Model: <b>{_model_size_label}</b>
         </div>
       </div>
       <span class="compute-badge gpu">HIGH PERFORMANCE</span>
@@ -577,11 +577,11 @@ else:
     <div class="compute-banner cpu">
       <span style='font-size:1rem'>💻</span>
       <div>
-        <div class="compute-label-cpu">CPU MODE — LIGHTWEIGHT</div>
+        <div class="compute-label-cpu">STANDARD MODE — LIGHTWEIGHT MODEL</div>
         <div class="compute-detail">
-          RT-DETR: <b>CPU</b> &nbsp;|&nbsp;
-          Ollama: <b>{OLLAMA_URL}</b> &nbsp;|&nbsp;
-          VLM Model: <b>{_model_size}</b>
+          RT-DETR: <b>CPU (video-ai-demo)</b> &nbsp;|&nbsp;
+          Ollama VLM: <b>{OLLAMA_URL}</b> &nbsp;|&nbsp;
+          VLM Model: <b>{_model_size_label}</b>
         </div>
       </div>
       <span class="compute-badge cpu">STANDARD</span>
