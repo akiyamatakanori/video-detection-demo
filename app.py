@@ -279,16 +279,6 @@ div[data-testid="stSidebar"] * { color: #8ab8cc !important; }
     color: #2a5a78; letter-spacing: 0.18em; text-transform: uppercase;
 }
 
-/* ── START/STOP・GPU ON/OFFの実ボタンを非表示（Markdown HTMLで代替表示）── */
-div[data-testid="column"]:nth-child(2) .stButton > button,
-div[data-testid="column"]:nth-child(3) .stButton > button {
-    opacity: 0 !important;
-    height: 0px !important; min-height: 0px !important;
-    padding: 0 !important; margin: -4px 0 0 0 !important;
-    border: none !important; overflow: hidden !important;
-    position: relative !important;
-}
-
 
 /* ── バナー ── */
 .compute-banner {
@@ -452,61 +442,23 @@ with hdr_col:
     </div>
     """, unsafe_allow_html=True)
 
-# ── START / STOP トグルボタン ──
+# ── START / STOP トグル（RT-DETRと同形式）──
 with tog_start_col:
-    st.markdown("<div style='height:14px'></div>", unsafe_allow_html=True)
-    if not st.session_state.processing:
-        st.markdown("""
-        <div style='font-family:Orbitron,monospace;font-size:0.72rem;font-weight:700;
-            letter-spacing:0.12em;text-align:center;padding:11px 6px;
-            background:#020f1f;border:2px solid #00e57a;border-radius:4px;
-            color:#00e57a;box-shadow:0 0 10px rgba(0,229,122,0.2);cursor:pointer;'>
-            ▶ &nbsp;START</div>
-        """, unsafe_allow_html=True)
-        if st.button("▶ START", key="start_stop_btn", use_container_width=True):
-            st.session_state.processing = True
-            st.rerun()
-    else:
-        st.markdown("""
-        <div style='font-family:Orbitron,monospace;font-size:0.72rem;font-weight:700;
-            letter-spacing:0.12em;text-align:center;padding:11px 6px;
-            background:#1a0008;border:2px solid #ff3060;border-radius:4px;
-            color:#ff3060;box-shadow:0 0 10px rgba(255,48,96,0.25);cursor:pointer;'>
-            ■ &nbsp;STOP</div>
-        """, unsafe_allow_html=True)
-        if st.button("■ STOP", key="start_stop_btn", use_container_width=True):
-            st.session_state.processing = False
-            st.rerun()
+    st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+    _new_processing = st.toggle("START", value=st.session_state.processing, key="start_stop_toggle")
+    if _new_processing != st.session_state.processing:
+        st.session_state.processing = _new_processing
+        st.rerun()
 
-# ── GPU ON/OFF トグルボタン ──
+# ── GPU ON/OFF トグル（RT-DETRと同形式）──
 with tog_gpu_col:
-    st.markdown("<div style='height:14px'></div>", unsafe_allow_html=True)
-    if st.session_state.use_gpu:
-        st.markdown("""
-        <div style='font-family:Orbitron,monospace;font-size:0.72rem;font-weight:700;
-            letter-spacing:0.12em;text-align:center;padding:11px 6px;
-            background:#020f1f;border:2px solid #00e57a;border-radius:4px;
-            color:#00e57a;box-shadow:0 0 10px rgba(0,229,122,0.2);cursor:pointer;'>
-            ⚡ GPU &nbsp;ON</div>
-        """, unsafe_allow_html=True)
-        if st.button("⚡ GPU ON", key="gpu_toggle_btn", use_container_width=True):
-            st.session_state.use_gpu = False
-            st.session_state.selected_model = CPU_DEFAULT_MODEL
-            st.cache_resource.clear()
-            st.rerun()
-    else:
-        st.markdown("""
-        <div style='font-family:Orbitron,monospace;font-size:0.72rem;font-weight:700;
-            letter-spacing:0.12em;text-align:center;padding:11px 6px;
-            background:#080e1a;border:2px solid #1e4a6a;border-radius:4px;
-            color:#3a8aaa;cursor:pointer;'>
-            💻 GPU &nbsp;OFF</div>
-        """, unsafe_allow_html=True)
-        if st.button("💻 GPU OFF", key="gpu_toggle_btn", use_container_width=True):
-            st.session_state.use_gpu = True
-            st.session_state.selected_model = GPU_DEFAULT_MODEL
-            st.cache_resource.clear()
-            st.rerun()
+    st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+    _new_gpu = st.toggle("GPU", value=st.session_state.use_gpu, key="gpu_toggle")
+    if _new_gpu != st.session_state.use_gpu:
+        st.session_state.use_gpu = _new_gpu
+        st.session_state.selected_model = GPU_DEFAULT_MODEL if _new_gpu else CPU_DEFAULT_MODEL
+        st.cache_resource.clear()
+        st.rerun()
 
 # ── バナー ──
 _model_size = "LARGE MODEL (32B+) · CUDA" if st.session_state.use_gpu else "SMALL MODEL (7B) · CPU"
