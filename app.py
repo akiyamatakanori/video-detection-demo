@@ -756,12 +756,22 @@ def extract_tags(log, top_n=30):
 def detect_highlights(log, top_n=5):
     return sorted(log, key=lambda x:len(x.get("text","")), reverse=True)[:top_n] if log else []
 
+# yt-dlp 共通オプション（全YouTube URL対応・高解像度・JSチャレンジ解決）
+_YTDLP_BASE_OPTS = {
+    "quiet":            True,
+    "no_warnings":      True,
+    "remote_components": "ejs:github",  # JSチャレンジ解決スクリプトを自動取得
+}
+
 def download_youtube(url):
     if not YT_DLP_AVAILABLE: return None,"yt-dlp not installed"
     ts  = datetime.now().strftime("%Y%m%d_%H%M%S")
     out = str(Path(DOWNLOAD_DIR)/f"video_{ts}.%(ext)s")
+    opts = {**_YTDLP_BASE_OPTS,
+            "format":  "best[height>=1080][ext=mp4]/best[height>=1080]/best",
+            "outtmpl": out}
     try:
-        with yt_dlp.YoutubeDL({"format":"best[height>=1080][ext=mp4]/best[height>=1080]/best","outtmpl":out,"quiet":True}) as ydl:
+        with yt_dlp.YoutubeDL(opts) as ydl:
             info  = ydl.extract_info(url, download=True)
             title = info.get("title","Unknown")
             for ext in [".mp4",".webm",".mkv"]:
@@ -775,9 +785,11 @@ def download_youtube(url):
 
 def get_stream_url(url):
     if not YT_DLP_AVAILABLE: return None,"",False,"yt-dlp not installed"
+    opts = {**_YTDLP_BASE_OPTS,
+            "format":        "best[height>=1080]/best",
+            "skip_download": True}
     try:
-        with yt_dlp.YoutubeDL({"format":"best[height>=1080]/best","quiet":True,
-                                "no_warnings":True,"skip_download":True}) as ydl:
+        with yt_dlp.YoutubeDL(opts) as ydl:
             info       = ydl.extract_info(url, download=False)
             title      = info.get("title","Unknown")
             is_live    = info.get("is_live",False)
