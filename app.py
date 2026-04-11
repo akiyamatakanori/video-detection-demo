@@ -280,16 +280,31 @@ div[data-testid="stSidebar"] * { color: #8ab8cc !important; }
 }
 
 
-/* ── トグルスイッチ カラー統一（シアン／近未来風）── */
-/* START / GPU トグル：ON状態 → シアン */
-div[data-testid="column"]:nth-child(2) div[data-testid="stToggle"] span[data-checked="true"],
-div[data-testid="column"]:nth-child(3) div[data-testid="stToggle"] span[data-checked="true"] {
-    background-color: #00b4d8 !important;
+/* ── Streamlit プライマリカラーをシアンに上書き（トグル・スライダー等） ── */
+:root {
+    --primary-color: #00b4d8 !important;
 }
-/* OFF状態 → ダークブルー */
-div[data-testid="column"]:nth-child(2) div[data-testid="stToggle"] span[data-checked="false"],
-div[data-testid="column"]:nth-child(3) div[data-testid="stToggle"] span[data-checked="false"] {
+/* input range (スライダー) */
+input[type="range"]::-webkit-slider-thumb { background: #00b4d8 !important; }
+input[type="range"]::-webkit-slider-runnable-track { background: #00b4d8 !important; }
+/* トグルスイッチ全般 */
+[role="switch"] { background-color: #00b4d8 !important; }
+[role="switch"][aria-checked="false"] { background-color: #0a2a40 !important; }
+
+/* ── トグルスイッチ カラー統一（シアン／近未来風）── */
+div[data-testid="column"]:nth-child(2) [role="switch"][aria-checked="true"],
+div[data-testid="column"]:nth-child(3) [role="switch"][aria-checked="true"] {
+    background-color: #00b4d8 !important;
+    border-color: #00b4d8 !important;
+}
+div[data-testid="column"]:nth-child(2) [role="switch"][aria-checked="false"],
+div[data-testid="column"]:nth-child(3) [role="switch"][aria-checked="false"] {
     background-color: #0a2a40 !important;
+    border-color: #0a3a55 !important;
+}
+div[data-testid="column"]:nth-child(2) [role="switch"],
+div[data-testid="column"]:nth-child(3) [role="switch"] {
+    background-color: #00b4d8 !important;
 }
 /* ラベル文字 → シアン・Orbitron */
 div[data-testid="column"]:nth-child(2) div[data-testid="stToggle"] p,
