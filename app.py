@@ -619,7 +619,8 @@ def run_detection(frame_rgb, use_v1, use_v2, threshold=0.45, device="cpu"):
             result["error"] = (result["error"] or "") + f" [{ver} inference:{exc}]"
     return result
 
-def ollama_analyze(frame_rgb, prompt, model_id, resize_pct, max_tokens):
+def ollama_analyze(frame_rgb, prompt, model_id, resize_pct, max_tokens,
+                   temperature=0.2, top_k=40, top_p=0.9):
     """
     Ollama /api/chat 形式で推論。
     content は string、images は別フィールドで渡す（Ollama互換形式）。
@@ -637,7 +638,8 @@ def ollama_analyze(frame_rgb, prompt, model_id, resize_pct, max_tokens):
                 "images":  [img_b64],
             }],
             "stream": False,
-            "options": {"num_predict": max_tokens, "temperature": 0.2},
+            "options": {"num_predict": max_tokens, "temperature": temperature,
+                        "top_k": top_k, "top_p": top_p},
         }
         resp = requests.post(
             f"{OLLAMA_URL}/api/chat",
@@ -699,10 +701,13 @@ def hf_analyze(frame_rgb, prompt, model_id, resize_pct, max_tokens):
     except Exception as exc:
         return {"ok":False,"text":f"HF error: {exc}","latency":time.time()-t0}
 
-def vlm_analyze(frame_rgb, prompt, model_name, resize_pct=80, max_tokens=400):
+def vlm_analyze(frame_rgb, prompt, model_name, resize_pct=80, max_tokens=400,
+                temperature=0.2, top_k=40, top_p=0.9):
     cfg = ALL_VISION_MODELS.get(model_name)
     if not cfg: return {"ok":False,"text":f"Unknown model: {model_name}","latency":0.0}
-    if cfg["backend"] == "ollama": return ollama_analyze(frame_rgb, prompt, cfg["id"], resize_pct, max_tokens)
+    if cfg["backend"] == "ollama":
+        return ollama_analyze(frame_rgb, prompt, cfg["id"], resize_pct, max_tokens,
+                              temperature, top_k, top_p)
     if cfg["backend"] == "nim":    return nim_analyze(frame_rgb, prompt, cfg["id"], resize_pct, max_tokens)
     return hf_analyze(frame_rgb, prompt, cfg["id"], resize_pct, max_tokens)
 
@@ -756,7 +761,7 @@ def download_youtube(url):
     ts  = datetime.now().strftime("%Y%m%d_%H%M%S")
     out = str(Path(DOWNLOAD_DIR)/f"video_{ts}.%(ext)s")
     try:
-        with yt_dlp.YoutubeDL({"format":"best[height<=720][ext=mp4]/best","outtmpl":out,"quiet":True}) as ydl:
+        with yt_dlp.YoutubeDL({"format":"best[height>=1080][ext=mp4]/best[height>=1080]/best","outtmpl":out,"quiet":True}) as ydl:
             info  = ydl.extract_info(url, download=True)
             title = info.get("title","Unknown")
             for ext in [".mp4",".webm",".mkv"]:
@@ -771,7 +776,7 @@ def download_youtube(url):
 def get_stream_url(url):
     if not YT_DLP_AVAILABLE: return None,"",False,"yt-dlp not installed"
     try:
-        with yt_dlp.YoutubeDL({"format":"best[height<=720]/best","quiet":True,
+        with yt_dlp.YoutubeDL({"format":"best[height>=1080]/best","quiet":True,
                                 "no_warnings":True,"skip_download":True}) as ydl:
             info       = ydl.extract_info(url, download=False)
             title      = info.get("title","Unknown")
@@ -779,7 +784,7 @@ def get_stream_url(url):
             stream_url = info.get("url")
             if not stream_url and "formats" in info:
                 for fmt in reversed(info["formats"]):
-                    if (fmt.get("height") or 9999)<=720 and fmt.get("url"):
+                    if (fmt.get("height") or 0)>=1080 and fmt.get("url"):
                         stream_url=fmt["url"]; break
             return (stream_url,title,is_live,None) if stream_url else (None,title,is_live,"No URL")
     except Exception as exc:
@@ -825,16 +830,18 @@ render_status("RUNNING" if st.session_state.processing else "READY")
 # ─────────────────────────────────────────────
 with st.sidebar:
     st.markdown("<div class='section-label'>Input Source</div>", unsafe_allow_html=True)
-    source_mode = st.radio("", ["YouTube (Download)","YouTube (Live)","Local Folder"],
-                           label_visibility="collapsed")
+    source_mode = st.radio("", ["YouTube (Download)","YouTube (Live)","Local Folder"])
     st.session_state.mode = ("Live" if "Live" in source_mode
                               else "YouTube" if "YouTube" in source_mode else "Local")
 
     if st.session_state.mode == "YouTube":
-        yt_url = st.text_input("YouTube URL", value=st.session_state.youtube_url,
+        # key指定でURL保持
+        yt_url = st.text_input("YouTube URL", key="yt_url_input",
+                               value=st.session_state.youtube_url,
                                placeholder="https://youtu.be/xxxx")
         if yt_url != st.session_state.youtube_url:
-            st.session_state.youtube_url = yt_url; st.session_state.video_file = None
+            st.session_state.youtube_url = yt_url
+            st.session_state.video_file  = None
         if st.button("Download", type="primary"):
             with st.spinner("Downloading..."):
                 path, title = download_youtube(st.session_state.youtube_url)
@@ -846,10 +853,13 @@ with st.sidebar:
                     st.error(title)
 
     elif st.session_state.mode == "Live":
-        live_url = st.text_input("Live URL", value=st.session_state.youtube_url,
-                                 placeholder="https://youtu.be/live_xxxx")
+        # key指定でURL保持・rerun後も消えない
+        live_url = st.text_input("Live URL", key="live_url_input",
+                                 value=st.session_state.youtube_url,
+                                 placeholder="https://youtu.be/xxxx")
         if live_url != st.session_state.youtube_url:
-            st.session_state.youtube_url = live_url; st.session_state.stream_url = None
+            st.session_state.youtube_url = live_url
+            st.session_state.stream_url  = None
         if st.button("Connect", type="primary"):
             with st.spinner("Connecting..."):
                 url,title,is_live,err = get_stream_url(st.session_state.youtube_url)
@@ -894,6 +904,12 @@ with st.sidebar:
     max_tokens   = st.slider("Max Tokens", 100, 800, 600 if st.session_state.use_gpu else 300, 50)
     resize_pct   = st.slider("Image Resize (%)", 20, 100, 80 if st.session_state.use_gpu else 60, 10)
 
+    st.markdown("<div class='section-label' style='margin-top:8px'>Generation Parameters</div>",
+                unsafe_allow_html=True)
+    temperature = st.slider("Temperature", 0.0, 1.0, 0.2, 0.05)
+    top_k       = st.slider("Top-K",       1,   100,  40,  1)
+    top_p       = st.slider("Top-P",       0.0, 1.0,  0.9, 0.05)
+
     st.divider()
     st.markdown("<div class='section-label'>Prompt</div>", unsafe_allow_html=True)
     preset_name = st.selectbox("Preset", list(PROMPT_PRESETS.keys()))
@@ -904,12 +920,21 @@ with st.sidebar:
         st.session_state.current_prompt = custom_p
 
     st.divider()
-    if st.button("🔌 Test Ollama"):
+    # ── Ollama 接続テスト（全モデル一括確認）──
+    if st.button("🔌 Test Ollama Connection"):
         with st.spinner("Testing..."):
             try:
                 r = requests.get(f"{OLLAMA_URL}/api/tags", timeout=8, verify=False)
                 if r.status_code == 200:
-                    st.success(f"OK — {len(r.json().get('models',[]))} models")
+                    installed = {m["name"] for m in r.json().get("models",[])}
+                    st.success(f"接続OK — {len(installed)} models installed")
+                    st.markdown("**モデル対応状況:**")
+                    for name, cfg in LOCAL_VISION_MODELS.items():
+                        mid = cfg["id"]
+                        # モデルIDのベース名で照合
+                        ok = any(mid.split(":")[0] in m for m in installed)
+                        icon = "✅" if ok else "❌"
+                        st.caption(f"{icon} {name.replace(' (GPU Server)','')}")
                 else:
                     st.error(f"HTTP {r.status_code}")
             except Exception as e:
@@ -1038,6 +1063,9 @@ with tab_live:
                         st.session_state.selected_model,
                         resize_pct=resize_pct,
                         max_tokens=max_tokens,
+                        temperature=temperature,
+                        top_k=top_k,
+                        top_p=top_p,
                     )
 
                     lat_str = f"{result['latency']:.2f}s"
