@@ -520,14 +520,12 @@ with tog_start_col:
                 unsafe_allow_html=True)
     if not st.session_state.processing:
         st.markdown("<div class='toggle-start'>▶&nbsp;START</div>", unsafe_allow_html=True)
-        if st.button("START_TRIGGER", key="start_stop_btn", use_container_width=True,
-                     label_visibility="collapsed"):
+        if st.button("▶ START", key="start_stop_btn", use_container_width=True):
             st.session_state.processing = True
             st.rerun()
     else:
         st.markdown("<div class='toggle-stop'>■&nbsp;STOP</div>", unsafe_allow_html=True)
-        if st.button("STOP_TRIGGER", key="start_stop_btn", use_container_width=True,
-                     label_visibility="collapsed"):
+        if st.button("■ STOP", key="start_stop_btn", use_container_width=True):
             st.session_state.processing = False
             st.rerun()
 
@@ -538,16 +536,14 @@ with tog_gpu_col:
                 unsafe_allow_html=True)
     if st.session_state.use_gpu:
         st.markdown("<div class='toggle-gpu-on'>⚡&nbsp;GPU</div>", unsafe_allow_html=True)
-        if st.button("GPU_TRIGGER", key="gpu_toggle_btn", use_container_width=True,
-                     label_visibility="collapsed"):
+        if st.button("→ CPU モードへ", key="gpu_toggle_btn", use_container_width=True):
             st.session_state.use_gpu    = False
             st.session_state.selected_model = CPU_DEFAULT_MODEL
             st.cache_resource.clear()
             st.rerun()
     else:
         st.markdown("<div class='toggle-gpu-off'>💻&nbsp;CPU</div>", unsafe_allow_html=True)
-        if st.button("CPU_TRIGGER", key="gpu_toggle_btn", use_container_width=True,
-                     label_visibility="collapsed"):
+        if st.button("→ GPU モードへ", key="gpu_toggle_btn", use_container_width=True):
             st.session_state.use_gpu    = True
             st.session_state.selected_model = GPU_DEFAULT_MODEL
             st.cache_resource.clear()
@@ -925,7 +921,7 @@ with st.sidebar:
     model_opts = list(ALL_VISION_MODELS.keys())
     cur_idx    = model_opts.index(st.session_state.selected_model) \
                  if st.session_state.selected_model in model_opts else 0
-    sel_model  = st.selectbox("Model", model_opts, index=cur_idx, label_visibility="collapsed")
+    sel_model  = st.selectbox("Model", model_opts, index=cur_idx)
     if sel_model != st.session_state.selected_model:
         st.session_state.selected_model = sel_model
 
@@ -937,7 +933,7 @@ with st.sidebar:
 
     st.divider()
     st.markdown("<div class='section-label'>Prompt</div>", unsafe_allow_html=True)
-    preset_name = st.selectbox("Preset", list(PROMPT_PRESETS.keys()), label_visibility="collapsed")
+    preset_name = st.selectbox("Preset", list(PROMPT_PRESETS.keys()))
     if st.button("Apply"):
         st.session_state.current_prompt = PROMPT_PRESETS[preset_name]; st.rerun()
     custom_p = st.text_area("Custom", value=st.session_state.current_prompt, height=100)
