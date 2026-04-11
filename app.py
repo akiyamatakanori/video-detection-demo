@@ -562,7 +562,7 @@ if st.session_state.use_gpu:
         <div class="compute-detail">
           RT-DETR: <b>CPU (video-ai-demo)</b> &nbsp;|&nbsp;
           Ollama VLM: <b>{OLLAMA_URL}</b> &nbsp;|&nbsp;
-          VLM Model: <b>{_model_size_label}</b>
+          VLM Model: <b>{_model_size}</b>
         </div>
       </div>
       <span class="compute-badge gpu">HIGH PERFORMANCE</span>
@@ -577,7 +577,7 @@ else:
         <div class="compute-detail">
           RT-DETR: <b>CPU (video-ai-demo)</b> &nbsp;|&nbsp;
           Ollama VLM: <b>{OLLAMA_URL}</b> &nbsp;|&nbsp;
-          VLM Model: <b>{_model_size_label}</b>
+          VLM Model: <b>{_model_size}</b>
         </div>
       </div>
       <span class="compute-badge cpu">STANDARD</span>
