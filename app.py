@@ -282,34 +282,38 @@ div[data-testid="stSidebar"] * { color: #8ab8cc !important; }
 /* ── START / STOP ボタン ── */
 div[data-testid="column"]:nth-child(2) .stButton > button {
     font-family: 'Orbitron', monospace !important;
-    font-size: 0.8rem !important; font-weight: 900 !important;
-    letter-spacing: 0.12em !important; border-radius: 30px !important;
+    font-size: 0.72rem !important; font-weight: 700 !important;
+    letter-spacing: 0.12em !important;
+    border-radius: 4px !important;
     padding: 10px 8px !important;
-    background: linear-gradient(135deg, #003a20, #005a30) !important;
-    border: 2px solid #00e57a !important; color: #00e57a !important;
-    box-shadow: 0 0 16px rgba(0,229,122,0.3) !important;
-    text-shadow: 0 0 8px rgba(0,229,122,0.6) !important;
-    animation: pulse-green 2.4s ease-in-out infinite !important;
+    background: #020f1f !important;
+    border: 2px solid #00e57a !important;
+    color: #00e57a !important;
+    box-shadow: 0 0 10px rgba(0,229,122,0.2) !important;
+    text-transform: uppercase !important;
+    transition: all 0.15s !important;
 }
-/* STOP状態（処理中）*/
-div[data-testid="column"]:nth-child(2) .stButton > button:has(div:contains("STOP")),
-div[data-testid="column"]:nth-child(2) .stButton > button[data-active="true"] {
-    background: linear-gradient(135deg, #3a0010, #5a0018) !important;
-    border: 2px solid #ff3060 !important; color: #ff3060 !important;
-    box-shadow: 0 0 16px rgba(255,48,96,0.35) !important;
-    text-shadow: 0 0 8px rgba(255,48,96,0.7) !important;
-    animation: pulse-red 1.2s ease-in-out infinite !important;
+div[data-testid="column"]:nth-child(2) .stButton > button:hover {
+    background: #002a18 !important;
+    box-shadow: 0 0 18px rgba(0,229,122,0.4) !important;
 }
-/* ── GPU / CPU ボタン ── */
+/* ── GPU ON/OFF ボタン ── */
 div[data-testid="column"]:nth-child(3) .stButton > button {
     font-family: 'Orbitron', monospace !important;
-    font-size: 0.78rem !important; font-weight: 900 !important;
-    letter-spacing: 0.1em !important; border-radius: 30px !important;
+    font-size: 0.72rem !important; font-weight: 700 !important;
+    letter-spacing: 0.12em !important;
+    border-radius: 4px !important;
     padding: 10px 8px !important;
-    background: linear-gradient(135deg, #002a18, #004a28) !important;
-    border: 2px solid #00e57a !important; color: #00e57a !important;
-    box-shadow: 0 0 14px rgba(0,229,122,0.25) !important;
-    text-shadow: 0 0 6px rgba(0,229,122,0.5) !important;
+    background: #020f1f !important;
+    border: 2px solid #00e57a !important;
+    color: #00e57a !important;
+    box-shadow: 0 0 10px rgba(0,229,122,0.2) !important;
+    text-transform: uppercase !important;
+    transition: all 0.15s !important;
+}
+div[data-testid="column"]:nth-child(3) .stButton > button:hover {
+    background: #002a18 !important;
+    box-shadow: 0 0 18px rgba(0,229,122,0.4) !important;
 }
 
 /* ── バナー ── */
@@ -482,6 +486,12 @@ with tog_start_col:
             st.session_state.processing = True
             st.rerun()
     else:
+        st.markdown("""<style>
+        div[data-testid="column"]:nth-child(2) .stButton > button {
+            border-color: #ff3060 !important; color: #ff3060 !important;
+            box-shadow: 0 0 10px rgba(255,48,96,0.25) !important;
+        }
+        </style>""", unsafe_allow_html=True)
         if st.button("■  STOP", key="start_stop_btn", use_container_width=True):
             st.session_state.processing = False
             st.rerun()
@@ -496,6 +506,12 @@ with tog_gpu_col:
             st.cache_resource.clear()
             st.rerun()
     else:
+        st.markdown("""<style>
+        div[data-testid="column"]:nth-child(3) .stButton > button {
+            border-color: #1e4a6a !important; color: #3a8aaa !important;
+            box-shadow: none !important;
+        }
+        </style>""", unsafe_allow_html=True)
         if st.button("💻 GPU  OFF", key="gpu_toggle_btn", use_container_width=True):
             st.session_state.use_gpu = True
             st.session_state.selected_model = GPU_DEFAULT_MODEL
@@ -637,7 +653,7 @@ def ollama_analyze(frame_rgb, prompt, model_id, resize_pct, max_tokens):
             f"{OLLAMA_URL}/api/generate",
             json={"model": model_id, "prompt": prompt, "images": [img_b64],
                   "stream": False, "options": {"num_predict": max_tokens, "temperature": 0.2}},
-            timeout=180, verify=False)
+            timeout=300, verify=False)
         lat = time.time() - t0
         if resp.status_code == 200:
             return {"ok": True,  "text": resp.json().get("response",""), "latency": lat, "img_b64": img_b64}
@@ -929,10 +945,10 @@ with tab_live:
     # ── 入力ソース表示バー ──
     _src_ready = False
     if st.session_state.mode == "Live" and st.session_state.stream_url:
-        st.info(f"📡 LIVE: {st.session_state.stream_title[:60]}")
+        st.info(f"LIVE: {st.session_state.stream_title[:60]}")
         _src_ready = True
     elif st.session_state.video_file:
-        st.info(f"📹 {Path(st.session_state.video_file).name}")
+        st.info(f"{Path(st.session_state.video_file).name}")
         _src_ready = True
     else:
         st.warning("⚠️ 左上 ≡ サイドバーで Input Source を設定してください")
@@ -941,15 +957,15 @@ with tab_live:
     col_feed, col_det, col_ai = st.columns([5, 3, 4])
 
     with col_feed:
-        st.markdown("<div class='panel-title'>📹 LIVE FEED</div>", unsafe_allow_html=True)
+        st.markdown("<div class='panel-title'>LIVE FEED</div>", unsafe_allow_html=True)
         frame_ph = st.empty()
 
     with col_det:
-        st.markdown("<div class='panel-title'>🎯 RT-DETR DETECTION</div>", unsafe_allow_html=True)
+        st.markdown("<div class='panel-title'>RT-DETR DETECTION</div>", unsafe_allow_html=True)
         det_ph = st.empty()
 
     with col_ai:
-        st.markdown("<div class='panel-title'>🤖 AI ANALYSIS（日本語）</div>", unsafe_allow_html=True)
+        st.markdown("<div class='panel-title'>AI ANALYSIS JPN</div>", unsafe_allow_html=True)
         ai_ph = st.empty()
         if st.session_state.latest_analysis:
             ai_ph.markdown(
