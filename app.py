@@ -280,7 +280,26 @@ div[data-testid="stSidebar"] * { color: #8ab8cc !important; }
 }
 
 
-/* ── バナー ── */
+/* ── トグルスイッチ カラー統一（シアン／近未来風）── */
+/* START / GPU トグル：ON状態 → シアン */
+div[data-testid="column"]:nth-child(2) div[data-testid="stToggle"] span[data-checked="true"],
+div[data-testid="column"]:nth-child(3) div[data-testid="stToggle"] span[data-checked="true"] {
+    background-color: #00b4d8 !important;
+}
+/* OFF状態 → ダークブルー */
+div[data-testid="column"]:nth-child(2) div[data-testid="stToggle"] span[data-checked="false"],
+div[data-testid="column"]:nth-child(3) div[data-testid="stToggle"] span[data-checked="false"] {
+    background-color: #0a2a40 !important;
+}
+/* ラベル文字 → シアン・Orbitron */
+div[data-testid="column"]:nth-child(2) div[data-testid="stToggle"] p,
+div[data-testid="column"]:nth-child(3) div[data-testid="stToggle"] p {
+    font-family: 'Orbitron', monospace !important;
+    font-size: 0.65rem !important;
+    letter-spacing: 0.12em !important;
+    color: #00b4d8 !important;
+    text-transform: uppercase !important;
+}
 .compute-banner {
     display: flex; align-items: center; gap: 12px;
     padding: 5px 14px; border-radius: 3px; margin-bottom: 6px;
@@ -588,7 +607,7 @@ def run_detection(frame_rgb, use_v1, use_v2, threshold=0.45, device="cpu"):
 def ollama_analyze(frame_rgb, prompt, model_id, resize_pct, max_tokens):
     """
     Ollama /api/chat 形式で推論。
-    /api/generate より広いモデル互換性（Llama3.2-Vision 90B, Gemma4 等）を持つ。
+    content は string、images は別フィールドで渡す（Ollama互換形式）。
     """
     if resize_pct < 100:
         frame_rgb = resize_frame(frame_rgb, resize_pct)
@@ -598,11 +617,9 @@ def ollama_analyze(frame_rgb, prompt, model_id, resize_pct, max_tokens):
         payload = {
             "model": model_id,
             "messages": [{
-                "role": "user",
-                "content": [
-                    {"type": "text",  "text": prompt},
-                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"}},
-                ],
+                "role":    "user",
+                "content": prompt,
+                "images":  [img_b64],
             }],
             "stream": False,
             "options": {"num_predict": max_tokens, "temperature": 0.2},
