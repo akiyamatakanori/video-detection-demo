@@ -643,7 +643,7 @@ def ollama_analyze(frame_rgb, prompt, model_id, resize_pct, max_tokens,
         }
         resp = requests.post(
             f"{OLLAMA_URL}/api/chat",
-            json=payload, timeout=300, verify=False)
+            json=payload, timeout=600, verify=False)
         lat = time.time() - t0
         if resp.status_code == 200:
             data = resp.json()
@@ -657,7 +657,7 @@ def ollama_analyze(frame_rgb, prompt, model_id, resize_pct, max_tokens,
         return {"ok": False, "text": f"Ollama 接続失敗 ({OLLAMA_URL})\nollama serve を確認してください",
                 "latency": time.time()-t0}
     except requests.exceptions.Timeout:
-        return {"ok": False, "text": f"Ollama タイムアウト (300s) — モデルが大きすぎる可能性があります",
+        return {"ok": False, "text": f"Ollama タイムアウト (600s) — 初回ロード中か、モデルが大きすぎる可能性があります。しばらく待ってから再試行してください。",
                 "latency": time.time()-t0}
     except Exception as exc:
         return {"ok": False, "text": f"Ollama エラー: {exc}", "latency": time.time()-t0}
