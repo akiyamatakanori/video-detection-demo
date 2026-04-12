@@ -126,26 +126,67 @@ CPU_DEFAULT_MODEL = "Qwen2.5-VL 7B (GPU Server)"
 
 # ── GPU サーバー Ollama モデル ─────────────────────────────
 LOCAL_VISION_MODELS = {
-    # Qwen2.5-VL シリーズ
-    "Qwen2.5-VL 7B (GPU Server)":            {"id": "qwen2.5vl:7b",                       "desc": "軽量・高速",          "backend": "ollama"},
-    "Qwen2.5-VL 32B (GPU Server)":           {"id": "qwen2.5vl:32b",                      "desc": "高精度",              "backend": "ollama"},
-    # Qwen3-VL シリーズ
-    "Qwen3-VL 8B (GPU Server)":              {"id": "qwen3-vl:8b",                         "desc": "最新世代・軽量",      "backend": "ollama"},
-    "Qwen3-VL 32B (GPU Server)":             {"id": "qwen3-vl:32b",                        "desc": "最新世代・高精度",    "backend": "ollama"},
-    # Llama3.2-Vision シリーズ
-    "Llama3.2-Vision 11B FP16 (GPU Server)": {"id": "llama3.2-vision:11b-instruct-fp16",  "desc": "FP16高精度",          "backend": "ollama"},
-    "Llama3.2-Vision 11B (GPU Server)":      {"id": "llama3.2-vision:latest",            "desc": "標準版",              "backend": "ollama"},
-    "Llama3.2-Vision 90B (GPU Server)":      {"id": "llama3.2-vision:90b",                 "desc": "最大規模",            "backend": "ollama"},
-    # Llama4
-    "Llama4 Scout 108B (GPU Server)":        {"id": "llama4:scout",                        "desc": "最新世代・大規模",    "backend": "ollama"},
-    # Gemma シリーズ
-    "Gemma4 31B (GPU Server)":               {"id": "gemma4:31b",                          "desc": "Google最新世代",      "backend": "ollama"},
-    "Gemma3 27B (GPU Server)":               {"id": "gemma3:27b",                          "desc": "マルチモーダル",      "backend": "ollama"},
-    "Gemma3 12B FP16 (GPU Server)":          {"id": "gemma3:12b-it-fp16",                  "desc": "FP16・高精度",        "backend": "ollama"},
-    "Gemma3n E4B (GPU Server)":              {"id": "gemma3n:e4b",                         "desc": "軽量・効率型",        "backend": "ollama"},
-    # GLM シリーズ
-    "GLM-4.7 Flash BF16 (GPU Server)":       {"id": "glm-4.7-flash:bf16",                  "desc": "中国語強化",          "backend": "ollama"},
-    "GLM-4.7 Flash BF16 192K (GPU Server)":  {"id": "glm-4.7-flash:bf16-192k",             "desc": "超長文コンテキスト",  "backend": "ollama"},
+    # ── Qwen2.5-VL シリーズ（ビジョン）──
+    "Qwen2.5-VL 7B (GPU Server)":            {"id": "qwen2.5vl:7b",                       "desc": "軽量・高速",            "backend": "ollama"},
+    "Qwen2.5-VL 32B (GPU Server)":           {"id": "qwen2.5vl:32b",                      "desc": "高精度",                "backend": "ollama"},
+    # ── Qwen3-VL シリーズ（ビジョン）──
+    "Qwen3-VL 8B (GPU Server)":              {"id": "qwen3-vl:8b",                        "desc": "最新世代・軽量",        "backend": "ollama"},
+    "Qwen3-VL 32B (GPU Server)":             {"id": "qwen3-vl:32b",                       "desc": "最新世代・高精度",      "backend": "ollama"},
+    # ── Qwen3.5 テキスト+ビジョン──
+    "Qwen3.5 4B (GPU Server)":               {"id": "qwen3.5:4b",                         "desc": "超軽量",                "backend": "ollama"},
+    "Qwen3.5 9B (GPU Server)":               {"id": "qwen3.5:9b",                         "desc": "軽量",                  "backend": "ollama"},
+    "Qwen3.5 27B (GPU Server)":              {"id": "qwen3.5:27b",                        "desc": "高精度",                "backend": "ollama"},
+    "Qwen3.5 122B (GPU Server)":             {"id": "qwen3.5:122b",                       "desc": "最大規模",              "backend": "ollama"},
+    # ── Qwen3 テキスト──
+    "Qwen3 32B (GPU Server)":                {"id": "qwen3:32b",                          "desc": "高精度テキスト",        "backend": "ollama"},
+    "Qwen3 235B A22B (GPU Server)":          {"id": "qwen3:235b-a22b",                    "desc": "超大規模MoE",           "backend": "ollama"},
+    # ── Qwen2.5 Coder──
+    "Qwen2.5 Coder 32B (GPU Server)":        {"id": "qwen2.5-coder:32b",                  "desc": "コーディング特化",      "backend": "ollama"},
+    # ── Qwen3 Coder──
+    "Qwen3 Coder Next Q4 (GPU Server)":      {"id": "qwen3-coder-next:q4_K_M",            "desc": "最新コーディング",      "backend": "ollama"},
+    # ── Llama3.2-Vision シリーズ──
+    "Llama3.2-Vision 11B FP16 (GPU Server)": {"id": "llama3.2-vision:11b-instruct-fp16",  "desc": "FP16高精度",            "backend": "ollama"},
+    "Llama3.2-Vision 11B (GPU Server)":      {"id": "llama3.2-vision:latest",             "desc": "標準版",                "backend": "ollama"},
+    "Llama3.2-Vision 90B (GPU Server)":      {"id": "llama3.2-vision:90b",                "desc": "最大規模",              "backend": "ollama"},
+    # ── Llama3.2 / 3.1 / 3.3 テキスト──
+    "Llama3.2 3B (GPU Server)":              {"id": "llama3.2:latest",                    "desc": "超軽量",                "backend": "ollama"},
+    "Llama3.1 8B (GPU Server)":              {"id": "llama3.1:latest",                    "desc": "軽量",                  "backend": "ollama"},
+    "Llama3.1 70B (GPU Server)":             {"id": "llama3.1:70b",                       "desc": "高精度",                "backend": "ollama"},
+    "Llama3.3 70B (GPU Server)":             {"id": "llama3.3:latest",                    "desc": "最新世代",              "backend": "ollama"},
+    "Llama3 70B Instruct (GPU Server)":      {"id": "llama3:70b-instruct",                "desc": "指示追従",              "backend": "ollama"},
+    # ── Llama4──
+    "Llama4 Scout 108B (GPU Server)":        {"id": "llama4:scout",                       "desc": "最新世代・大規模",      "backend": "ollama"},
+    # ── Gemma4 / Gemma3 / Gemma3n──
+    "Gemma4 31B (GPU Server)":               {"id": "gemma4:31b",                         "desc": "Google最新世代",        "backend": "ollama"},
+    "Gemma3n E4B (GPU Server)":              {"id": "gemma3n:e4b",                        "desc": "軽量・効率型",          "backend": "ollama"},
+    "Gemma3 27B (GPU Server)":               {"id": "gemma3:27b",                         "desc": "マルチモーダル",        "backend": "ollama"},
+    "Gemma3 12B FP16 (GPU Server)":          {"id": "gemma3:12b-it-fp16",                 "desc": "FP16・高精度",          "backend": "ollama"},
+    # ── Granite4──
+    "Granite4 Small H (GPU Server)":         {"id": "granite4:small-h",                   "desc": "IBM最新",               "backend": "ollama"},
+    # ── GLM シリーズ──
+    "GLM-4.7 Flash BF16 (GPU Server)":       {"id": "glm-4.7-flash:bf16",                 "desc": "中国語強化",            "backend": "ollama"},
+    "GLM-4.7 Flash BF16 192K (GPU Server)":  {"id": "glm-4.7-flash:bf16-192k",            "desc": "超長文コンテキスト",    "backend": "ollama"},
+    # ── GPT-OSS──
+    "GPT-OSS 20B (GPU Server)":              {"id": "gpt-oss:20b",                        "desc": "軽量GPT互換",           "backend": "ollama"},
+    "GPT-OSS 120B (GPU Server)":             {"id": "gpt-oss:120b",                       "desc": "大規模GPT互換",         "backend": "ollama"},
+    "GPT-OSS 120B 128K (GPU Server)":        {"id": "gpt-oss:120b-128k",                  "desc": "長文コンテキスト",      "backend": "ollama"},
+    # ── Nemotron──
+    "Nemotron 70B (GPU Server)":             {"id": "nemotron:latest",                    "desc": "NVIDIA推論特化",        "backend": "ollama"},
+    "Nemotron Cascade 30B (GPU Server)":     {"id": "nemotron-cascade-2:30b",             "desc": "カスケード推論",        "backend": "ollama"},
+    "Nemotron Super 120B (GPU Server)":      {"id": "nemotron-3-super:120b",              "desc": "超高精度",              "backend": "ollama"},
+    # ── Mistral Small──
+    "Mistral Small 3.1 (GPU Server)":        {"id": "mistral-small3.1:latest",            "desc": "軽量・高速",            "backend": "ollama"},
+    "Mistral Small 3.2 24B (GPU Server)":    {"id": "mistral-small3.2:24b",               "desc": "最新世代",              "backend": "ollama"},
+    # ── Phi4──
+    "Phi4 14B (GPU Server)":                 {"id": "phi4:14b",                           "desc": "Microsoft最新",         "backend": "ollama"},
+    "Phi4 Mini (GPU Server)":                {"id": "phi4-mini:latest",                   "desc": "軽量版",                "backend": "ollama"},
+    # ── Command-A / Command-R+──
+    "Command-A (GPU Server)":                {"id": "command-a:latest",                   "desc": "Cohere最新",            "backend": "ollama"},
+    "Command-R+ (GPU Server)":               {"id": "command-r-plus:latest",              "desc": "RAG特化",               "backend": "ollama"},
+    # ── Cogito──
+    "Cogito 32B (GPU Server)":               {"id": "cogito:32b",                         "desc": "推論特化",              "backend": "ollama"},
+    # ── Aya Expanse──
+    "Aya Expanse 32B (GPU Server)":          {"id": "aya-expanse:32b",                    "desc": "多言語特化",            "backend": "ollama"},
 }
 
 # ── NVIDIA NIM API モデル ──────────────────────────────────
