@@ -134,7 +134,7 @@ LOCAL_VISION_MODELS = {
     "Qwen3-VL 32B (GPU Server)":             {"id": "qwen3-vl:32b",                        "desc": "最新世代・高精度",    "backend": "ollama"},
     # Llama3.2-Vision シリーズ
     "Llama3.2-Vision 11B FP16 (GPU Server)": {"id": "llama3.2-vision:11b-instruct-fp16",  "desc": "FP16高精度",          "backend": "ollama"},
-    "Llama3.2-Vision 11B (GPU Server)":      {"id": "x/llama3.2-vision:latest",            "desc": "標準版",              "backend": "ollama"},
+    "Llama3.2-Vision 11B (GPU Server)":      {"id": "llama3.2-vision:latest",            "desc": "標準版",              "backend": "ollama"},
     "Llama3.2-Vision 90B (GPU Server)":      {"id": "llama3.2-vision:90b",                 "desc": "最大規模",            "backend": "ollama"},
     # Llama4
     "Llama4 Scout 108B (GPU Server)":        {"id": "llama4:scout",                        "desc": "最新世代・大規模",    "backend": "ollama"},
