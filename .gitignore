@@ -47,3 +47,6 @@ Thumbs.db
 # ログ
 *.log
 logs/
+cert.pem
+key.pem
+cookies.txt
