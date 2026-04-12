@@ -1064,47 +1064,39 @@ with tab_live:
             st.session_state.processing = False
         else:
             render_status("RUNNING")
-            last_vlm_time = 0.0
-            frame_idx     = 0
-            _device       = get_device(st.session_state.use_gpu)
-
-            # ── VLM をバックグラウンドスレッドで実行 ──
-            import threading
-            _vlm_result   = {"done": True, "result": None, "frame": None, "ts": ""}
-            _vlm_lock     = threading.Lock()
-
-            def _vlm_worker(frame_rgb, prompt, model, rpct, mtok, temp, tk, tp, ts):
-                r = vlm_analyze(frame_rgb, prompt, model, rpct, mtok, temp, tk, tp)
-                with _vlm_lock:
-                    _vlm_result["result"] = r
-                    _vlm_result["ts"]     = ts
-                    _vlm_result["done"]   = True
+            last_vlm_time  = 0.0
+            frame_idx      = 0
+            det_result     = {"v1":[], "v2":[], "error": None}
+            _device        = get_device(st.session_state.use_gpu)
+            _det_interval  = 3   # RT-DETRは3フレームに1回
+            _det_counter   = 0
 
             while st.session_state.processing:
-                # ── 最新フレームに追いつく（ライブ遅延解消）──
+                # ライブ時：バッファを1フレーム読み飛ばして遅延を減らす
                 if st.session_state.mode == "Live":
-                    # grab()でバッファを読み飛ばし最新フレームを取得
-                    for _ in range(3):
-                        cap.grab()
+                    cap.grab()
                 ret, frame = cap.read()
                 if not ret:
                     if st.session_state.mode != "Live":
                         cap.set(cv2.CAP_PROP_POS_FRAMES, 0); continue
                     break
 
-                frame_rgb  = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                frame_idx += 1
+                frame_rgb    = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                frame_idx   += 1
+                _det_counter += 1
 
-                # RT-DETR（GPU/CPU 切替）
-                det_result = run_detection(
-                    frame_rgb,
-                    use_v1=st.session_state.det_v1_enabled,
-                    use_v2=st.session_state.det_v2_enabled,
-                    threshold=det_threshold,
-                    device=_device,
-                )
+                # RT-DETR（_det_intervalフレームに1回のみ実行）
+                if _det_counter >= _det_interval:
+                    _det_counter = 0
+                    det_result = run_detection(
+                        frame_rgb,
+                        use_v1=st.session_state.det_v1_enabled,
+                        use_v2=st.session_state.det_v2_enabled,
+                        threshold=det_threshold,
+                        device=_device,
+                    )
 
-                # ① 映像（常に最新フレームを表示）
+                # ① 映像（毎フレーム表示）
                 annotated = draw_boxes(frame_rgb,
                     {k:v for k,v in det_result.items() if k in ("v1","v2")})
                 frame_ph.image(annotated, channels="RGB", use_container_width=True)
