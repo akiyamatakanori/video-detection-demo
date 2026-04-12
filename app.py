@@ -502,7 +502,7 @@ _cur_device = get_device(st.session_state.use_gpu)
 # ─────────────────────────────────────────────
 # ヘッダー行
 # ─────────────────────────────────────────────
-hdr_col, tog_start_col, tog_gpu_col = st.columns([5, 1, 1])
+hdr_col, tog_gpu_col = st.columns([6, 1])
 
 with hdr_col:
     st.markdown("""
@@ -518,20 +518,13 @@ with hdr_col:
     </div>
     """, unsafe_allow_html=True)
 
-# ── START / STOP トグル（RT-DETRと同形式）──
-with tog_start_col:
-    st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
-    _new_processing = st.toggle("START", value=st.session_state.processing, key="start_stop_toggle")
-    if _new_processing != st.session_state.processing:
-        st.session_state.processing = _new_processing
-        st.rerun()
-
-# ── GPU ON/OFF トグル（RT-DETRと同形式）──
+# ── GPU トグル（ON=GPU起動 / OFF=CPU切替え再起動）──
 with tog_gpu_col:
     st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
     _new_gpu = st.toggle("GPU", value=st.session_state.use_gpu, key="gpu_toggle")
     if _new_gpu != st.session_state.use_gpu:
-        st.session_state.use_gpu = _new_gpu
+        st.session_state.use_gpu       = _new_gpu
+        st.session_state.processing    = True   # 自動START
         st.session_state.selected_model = GPU_DEFAULT_MODEL if _new_gpu else CPU_DEFAULT_MODEL
         st.cache_resource.clear()
         st.rerun()
@@ -1008,8 +1001,8 @@ with st.sidebar:
 # ─────────────────────────────────────────────
 # メインタブ
 # ─────────────────────────────────────────────
-tab_live, tab_search, tab_summary, tab_highlights, tab_log, tab_perf = st.tabs([
-    "LIVE DETECTION", "VIDEO SEARCH", "SUMMARIZATION", "HIGHLIGHTS", "ANALYSIS LOG", "PERFORMANCE"
+tab_live, tab_search, tab_summary, tab_highlights, tab_log, tab_perf, tab_hd = st.tabs([
+    "LIVE DETECTION", "VIDEO SEARCH", "SUMMARIZATION", "HIGHLIGHTS", "ANALYSIS LOG", "PERFORMANCE", "LIVE FEED"
 ])
 
 # ────────────────────────────────────────────────────────────
@@ -1333,9 +1326,154 @@ with tab_perf:
     else:
         st.info("GPU/CPU モードを切り替えながら分析を実行するとグラフが表示されます。")
 
-# ─────────────────────────────────────────────
-# フッター
-# ─────────────────────────────────────────────
+# ────────────────────────────────────────────────────────────
+# TAB: LIVE FEED (HD · TV Projection)
+# ────────────────────────────────────────────────────────────
+with tab_hd:
+    import streamlit.components.v1 as components
+
+    # YouTube動画IDを抽出するユーティリティ
+    def _extract_yt_id(url):
+        if not url: return None
+        import re
+        m = re.search(r'(?:v=|youtu\.be/|live/)([A-Za-z0-9_-]{11})', url)
+        return m.group(1) if m else None
+
+    st.markdown("""
+    <style>
+    .hd-header {
+        font-family: 'Rajdhani', 'Orbitron', monospace;
+        font-size: 0.75rem;
+        letter-spacing: 0.12em;
+        color: #00b4d8;
+        text-transform: uppercase;
+        margin-bottom: 8px;
+    }
+    .hd-badge {
+        display: inline-block;
+        background: #00b4d8;
+        color: #010d1a;
+        font-size: 0.6rem;
+        font-weight: 700;
+        letter-spacing: 0.1em;
+        padding: 2px 8px;
+        margin-left: 8px;
+        border-radius: 2px;
+    }
+    .hd-info {
+        font-family: 'Rajdhani', monospace;
+        font-size: 0.65rem;
+        color: #1a6080;
+        letter-spacing: 0.08em;
+        margin-top: 6px;
+    }
+    </style>
+    <div class="hd-header">
+        HIGH RESOLUTION LIVE FEED
+        <span class="hd-badge">HD</span>
+        <span class="hd-badge" style="background:#06d6a0">TV PROJECTION</span>
+    </div>
+    <div class="hd-info">
+        OPTIMIZED FOR 42"+ DISPLAY · YOUTUBE NATIVE PLAYER · 1080p / 4K AUTO
+    </div>
+    """, unsafe_allow_html=True)
+
+    _yt_url = st.session_state.get("youtube_url", "")
+    _yt_id  = _extract_yt_id(_yt_url)
+
+    if _yt_id:
+        # YouTubeネイティブプレーヤーをフル幅で埋め込み（最高画質自動選択）
+        _embed_html = f"""
+        <style>
+          body {{ margin:0; padding:0; background:#010d1a; }}
+          .yt-wrapper {{
+            position: relative;
+            width: 100%;
+            padding-bottom: 56.25%;
+            background: #010d1a;
+          }}
+          .yt-wrapper iframe {{
+            position: absolute;
+            top: 0; left: 0;
+            width: 100%;
+            height: 100%;
+            border: 1px solid #00b4d8;
+          }}
+          .yt-label {{
+            font-family: 'Courier New', monospace;
+            font-size: 11px;
+            color: #00b4d8;
+            letter-spacing: 0.1em;
+            text-transform: uppercase;
+            padding: 4px 0 8px 2px;
+            background: #010d1a;
+          }}
+        </style>
+        <div class="yt-label">▶ LIVE SOURCE · {_yt_url}</div>
+        <div class="yt-wrapper">
+          <iframe
+            src="https://www.youtube.com/embed/{_yt_id}?autoplay=1&controls=1&rel=0&modestbranding=1&vq=hd1080&playsinline=1"
+            allow="autoplay; encrypted-media; fullscreen"
+            allowfullscreen>
+          </iframe>
+        </div>
+        <div class="yt-label" style="margin-top:6px">
+          STREAM ID: {_yt_id} &nbsp;·&nbsp; RESOLUTION: AUTO (UP TO 4K) &nbsp;·&nbsp;
+          TIP: PRESS F11 FOR FULLSCREEN PROJECTION
+        </div>
+        """
+        components.html(_embed_html, height=700, scrolling=False)
+
+    elif st.session_state.get("stream_url") or st.session_state.get("video_file"):
+        # ローカルファイル／非YouTube URLの場合はcv2でHD表示
+        st.markdown("""
+        <div class="hd-info" style="color:#ffd166">
+            ⚠ NON-YOUTUBE SOURCE DETECTED · USING FRAME CAPTURE MODE
+        </div>
+        """, unsafe_allow_html=True)
+
+        _hd_src = st.session_state.get("stream_url") or st.session_state.get("video_file")
+        if st.button("▶ START HD CAPTURE", type="primary"):
+            _hd_cap = cv2.VideoCapture(_hd_src)
+            _hd_ph  = st.empty()
+            _hd_stop = st.button("■ STOP", key="hd_stop")
+            for _ in range(300):
+                if _hd_stop: break
+                ret, frm = _hd_cap.read()
+                if not ret: break
+                _hd_ph.image(cv2.cvtColor(frm, cv2.COLOR_BGR2RGB),
+                             channels="RGB", use_container_width=True)
+            _hd_cap.release()
+    else:
+        # ソース未設定の場合
+        st.markdown("""
+        <style>
+        .hd-placeholder {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 420px;
+            border: 1px solid #0a3040;
+            background: #020f1f;
+            color: #1a6080;
+            font-family: 'Rajdhani', monospace;
+            font-size: 0.9rem;
+            letter-spacing: 0.1em;
+            text-transform: uppercase;
+        }
+        .hd-placeholder .icon { font-size: 3rem; margin-bottom: 16px; }
+        .hd-placeholder .sub { font-size: 0.65rem; color: #0a3040; margin-top: 8px; }
+        </style>
+        <div class="hd-placeholder">
+            <div class="icon">📺</div>
+            <div>NO SOURCE CONNECTED</div>
+            <div class="sub">CONNECT A YOUTUBE LIVE URL IN THE SIDEBAR TO BEGIN HD PROJECTION</div>
+            <div class="sub" style="margin-top:16px; color:#00b4d8">
+                SIDEBAR → INPUT SOURCE → YOUTUBE (LIVE) → PASTE URL → CONNECT
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
 st.markdown(
     "<div class='vit-footer'>"
     "VIDEO INTELLIGENCE TERMINAL &nbsp;|&nbsp;"
