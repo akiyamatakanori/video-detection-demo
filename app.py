@@ -798,10 +798,12 @@ def detect_highlights(log, top_n=5):
     return sorted(log, key=lambda x:len(x.get("text","")), reverse=True)[:top_n] if log else []
 
 # yt-dlp 共通オプション（全YouTube URL対応・高解像度・JSチャレンジ解決）
+_COOKIES_FILE = str(Path(__file__).parent / "cookies.txt")
 _YTDLP_BASE_OPTS = {
-    "quiet":            True,
-    "no_warnings":      True,
-    "remote_components": "ejs:github",  # JSチャレンジ解決スクリプトを自動取得
+    "quiet":             True,
+    "no_warnings":       True,
+    "remote_components": "ejs:github",
+    **({"cookiefile": _COOKIES_FILE} if Path(_COOKIES_FILE).exists() else {}),
 }
 
 def download_youtube(url):
