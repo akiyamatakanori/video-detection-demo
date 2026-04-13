@@ -18,6 +18,21 @@ NVIDIA NIM APIとのハイブリッド動作対応。
 
 ---
 
+## アクセス方法
+
+**ブラウザで以下のURLを開くだけで利用できます：**
+
+```
+http://10.71.129.9:8503
+```
+
+- ターミナル操作不要
+- SSHトンネル不要
+- 誰のPCからでもアクセス可能
+- 両サーバーはサーバー起動時に自動起動
+
+---
+
 ## 構成
 
 | 機能 | モデル | 動作場所 |
@@ -30,10 +45,13 @@ NVIDIA NIM APIとのハイブリッド動作対応。
 ### アーキテクチャ
 
 ```
-ブラウザ
-  ↓ http://192.168.11.111:8503
+ブラウザ（誰のPCからでも）
+  ↓ http://10.71.129.9:8503
+video-ai-demo (10.71.129.9)
+  └── nginx リバースプロキシ（systemd・自動起動）
+        ↓ 自動転送
 GPU サーバー (192.168.11.111 / ailab5)
-  ├── Streamlit アプリ (app.py)  ← GPU サーバー上で直接稼働
+  ├── Streamlit アプリ (app.py) ← systemd・自動起動
   ├── RT-DETR v1/v2  → GPU ON: CUDA (H100) / GPU OFF: CPU
   └── Ollama VLM     → GPU ON: 大型モデル (32B+) / GPU OFF: 軽量モデル (7B)
                         接続先: localhost:11434 (同一サーバー・ネットワーク遅延ゼロ)
@@ -86,14 +104,9 @@ python3 download_models.py
 
 ### 6. OllamaでVLMモデルをダウンロード
 
-GPUサーバー上のOllamaに使用するモデルをpullします。
-
 ```bash
-# 例: 軽量モデル（7B）
-ollama pull qwen2.5vl:7b
-
-# 例: 高精度モデル（32B）
-ollama pull qwen2.5vl:32b
+ollama pull qwen2.5vl:7b   # 軽量モデル
+ollama pull qwen2.5vl:32b  # 高精度モデル
 ```
 
 ### 7. Ollama systemd設定（GPU利用・推奨設定）
@@ -120,14 +133,56 @@ sudo systemctl restart ollama
 > **OLLAMA_KEEP_ALIVE=0**: モデル推論後にVRAMを即時解放。モデル切替時の競合を防ぎます。  
 > **OLLAMA_NEW_ENGINE=true**: 新エンジンを有効化し、CUDA H100を確実に利用します。
 
-### 8. 起動
+### 8. Streamlit systemdサービス登録（GPU サーバーで実行）
 
 ```bash
-source .venv/bin/activate
-streamlit run app.py --server.port 8503 --server.address 0.0.0.0
+sudo tee /etc/systemd/system/streamlit-vit.service << 'EOF'
+[Unit]
+Description=Video Intelligence Terminal
+After=network.target ollama.service
+
+[Service]
+User=ailab
+WorkingDirectory=/home/ailab/video-detection-demo
+ExecStart=/home/ailab/video-detection-demo/.venv/bin/streamlit run app.py --server.port 8503 --server.address 0.0.0.0
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+sudo systemctl daemon-reload
+sudo systemctl enable streamlit-vit
+sudo systemctl start streamlit-vit
 ```
 
-ブラウザで `http://192.168.11.111:8503` を開く。
+### 9. nginxリバースプロキシ設定（video-ai-demoで実行）
+
+```bash
+sudo apt install -y nginx
+
+sudo tee /etc/nginx/sites-available/streamlit << 'EOF'
+server {
+    listen 8503;
+    location / {
+        proxy_pass http://192.168.11.111:8503;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_read_timeout 86400;
+    }
+}
+EOF
+
+sudo ln -sf /etc/nginx/sites-available/streamlit /etc/nginx/sites-enabled/
+sudo rm -f /etc/nginx/sites-enabled/default
+sudo systemctl enable nginx
+sudo systemctl restart nginx
+```
+
+ブラウザで `http://10.71.129.9:8503` を開く。
 
 ---
 
@@ -149,9 +204,6 @@ video-detection-demo/
     └── exports/            # Export JSON（タイムスタンプ付き・自動保存）
 ```
 
-> **注意:** `data/` 配下のファイルはすべて自動保存されます。  
-> Gitには含まれないため、バックアップは別途実施してください。
-
 ---
 
 ## 環境変数（.env）
@@ -171,9 +223,6 @@ EXPORT_DIR=/home/ailab/video-detection-demo/data/exports
 # ── Local File のデフォルト参照フォルダ ─────────────────
 DEFAULT_VIDEO_FOLDER=/home/ailab/videos
 ```
-
-> **ポイント:** `DATA_DIR` をNASやマウントされたストレージのパスに変更するだけで、  
-> すべての生成ファイルの保存先をまとめて変更できます。
 
 ---
 
@@ -202,7 +251,6 @@ DEFAULT_VIDEO_FOLDER=/home/ailab/videos
 - 最大4K・1080p自動選択
 - **F11キー**でフルスクリーン → 42インチ以上のTV・プロジェクター投影対応
 - サイドバーでYouTube LiveのURLを接続済みの場合に自動で映像を表示
-- 近未来UIテーマに統一した英語表記
 
 ---
 
@@ -279,14 +327,6 @@ DEFAULT_VIDEO_FOLDER=/home/ailab/videos
 | **Max Tokens** | 1回の出力文字数上限 | **200〜300に下げる**（最も効果大） |
 | **Image Resize (%)** | VLMに送る画像サイズ | **50〜60%に下げる** |
 
-### 重要な仕組み
-
-```
-実際の分析間隔 = max(VLM Interval, 推論時間)
-```
-
-**ステータスバーの LATENCY 値**が現在の推論時間の目安です。
-
 ### 環境別推奨設定
 
 | パラメータ | ⚡ GPU モード | 💻 CPU モード |
@@ -299,49 +339,71 @@ DEFAULT_VIDEO_FOLDER=/home/ailab/videos
 
 ## トラブルシューティング
 
+### アプリが開かない（502 Bad Gateway）
+
+GPUサーバーのStreamlitが停止しています：
+
+```bash
+ssh ailab@192.168.11.111  # video-ai-demoから
+sudo systemctl status streamlit-vit
+sudo systemctl restart streamlit-vit
+```
+
 ### OllamaがGPUを使っていない
 
 ```bash
-# GPU認識確認
-journalctl -u ollama -n 20 --no-pager | grep -i "cuda\|H100\|inference"
+journalctl -u ollama -n 20 --no-pager | grep -i "cuda\|H100"
+# 正常: ggml_cuda_init: found 2 CUDA devices: NVIDIA H100 PCIe
 
-# 正常時の出力例:
-# ggml_cuda_init: found 2 CUDA devices: NVIDIA H100 PCIe
-# load_backend: loaded CUDA backend from /usr/local/lib/ollama/cuda_v12/libggml-cuda.so
-```
-
-CUDAバックエンドが見つからない場合はOllamaを再インストール：
-
-```bash
+# CUDAバックエンドが見つからない場合は再インストール
 curl -fsSL https://ollama.com/install.sh | sh
 sudo systemctl restart ollama
 ```
 
 ### VLLMコンテナがGPUを占有する
 
-別のVLLMコンテナが起動してOllamaのVRAMを奪うことがあります：
-
 ```bash
-nvidia-smi | grep -i vllm   # 確認
+nvidia-smi | grep -i vllm
 sudo docker stop llm-jp-4-thinking-vllm-server
 sudo docker update --restart=no llm-jp-4-thinking-vllm-server
 ```
 
 ### YouTubeのボット判定エラー
 
-```
-ERROR: Sign in to confirm you're not a bot.
-```
-
 ```bash
 # Mac側でCookieをエクスポート
 yt-dlp --cookies-from-browser chrome --cookies cookies.txt "https://youtu.be/XXXX" --skip-download
 
-# GPUサーバーへ転送
-scp cookies.txt ailab@192.168.11.111:/home/ailab/video-detection-demo/
+# video-ai-demo経由でGPUサーバーへ転送
+scp cookies.txt ailab@10.71.129.9:/tmp/
+ssh ailab@10.71.129.9
+scp /tmp/cookies.txt ailab@192.168.11.111:/home/ailab/video-detection-demo/
 ```
 
-`cookies.txt` が存在する場合、アプリが自動的に認証に使用します。
+---
+
+## サービス管理コマンド
+
+### GPUサーバー（ailab5）
+
+```bash
+# Streamlit
+sudo systemctl status streamlit-vit
+sudo systemctl restart streamlit-vit
+sudo systemctl stop streamlit-vit
+
+# Ollama
+sudo systemctl status ollama
+sudo systemctl restart ollama
+```
+
+### video-ai-demo（踏み台サーバー）
+
+```bash
+# nginx リバースプロキシ
+sudo systemctl status nginx
+sudo systemctl restart nginx
+```
 
 ---
 
@@ -351,8 +413,7 @@ scp cookies.txt ailab@192.168.11.111:/home/ailab/video-detection-demo/
 - `data/` はGitに含まれません（生成ファイルを保護）
 - `cookies.txt` はGitに含まれません（認証情報を保護）
 - `certs/` はGitに含まれません（`run.sh` が自動生成）
-- Ollamaが起動していない場合はローカルVLMは使えません（NIMモデルは引き続き使用可）
-- 社内プロキシ環境ではHuggingFaceへのアクセスがブロックされる場合があります
+- Ollamaが起動していない場合はローカルVLMは使えません
 - テキスト専用モデルを映像分析モードで使用するとOllamaエラーが発生します
 
 ---
