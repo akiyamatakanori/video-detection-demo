@@ -1130,8 +1130,8 @@ with st.sidebar:
 # ─────────────────────────────────────────────
 # メインタブ
 # ─────────────────────────────────────────────
-tab_live, tab_search, tab_summary, tab_highlights, tab_log, tab_perf, tab_hd = st.tabs([
-    "LIVE DETECTION", "VIDEO SEARCH", "SUMMARIZATION", "HIGHLIGHTS", "ANALYSIS LOG", "PERFORMANCE", "LIVE FEED"
+tab_live, tab_search, tab_summary, tab_highlights, tab_log = st.tabs([
+    "LIVE DETECTION", "VIDEO SEARCH", "SUMMARIZATION", "HIGHLIGHTS", "ANALYSIS LOG"
 ])
 
 # ────────────────────────────────────────────────────────────
@@ -1343,24 +1343,74 @@ with tab_search:
 # ────────────────────────────────────────────────────────────
 with tab_summary:
     st.markdown("<div class='panel-title'>Video Summarization</div>", unsafe_allow_html=True)
-    sum_model = st.selectbox("Text Model", list(TEXT_MODELS.keys()))
-    if st.button("Generate Summary", type="primary"):
-        if st.session_state.analysis_log:
-            with st.spinner("Generating..."):
-                r = nim_text_summarize(st.session_state.analysis_log, sum_model)
-                st.session_state.summary_text = r["text"]
-                # SUMMARY_DIR に自動保存
-                try:
-                    _ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-                    _sf = SUMMARY_DIR / f"summary_{_ts}.txt"
-                    _sf.write_text(st.session_state.summary_text, encoding="utf-8")
-                except Exception:
-                    pass
+
+    # ── モデル選択（Ollama全モデル + NIM）──
+    _sum_ollama_models = {
+        f"{k}": {"id": v["id"], "backend": "ollama"}
+        for k, v in LOCAL_VISION_MODELS.items()
+    }
+    _sum_nim_models = {
+        f"{k} [NIM]": {"id": v["id"], "backend": "nim"}
+        for k, v in TEXT_MODELS.items()
+    }
+    _sum_all_models = {**_sum_ollama_models, **_sum_nim_models}
+    sum_model_name = st.selectbox("Model", list(_sum_all_models.keys()),
+                                  index=0,
+                                  help="Ollama（ローカルGPU）またはNIM APIを選択")
+
+    _sum_cfg = _sum_all_models[sum_model_name]
+
+    if st.button("▶ Generate Summary", type="primary"):
+        if not st.session_state.analysis_log:
+            st.warning("分析ログがありません。先にLIVE DETECTIONで分析を実行してください。")
         else:
-            st.warning("分析ログがありません")
+            with st.spinner("Generating summary..."):
+                log_str = "\n\n".join([
+                    f"[{e['ts']}] Frame {e['frame_idx']}: {e['text']}"
+                    for e in st.session_state.analysis_log
+                ])
+                _sum_prompt = SUMMARIZE_PROMPT.format(analysis_data=log_str)
+
+                if _sum_cfg["backend"] == "ollama":
+                    # Ollamaでローカル要約
+                    try:
+                        _resp = requests.post(
+                            f"{OLLAMA_URL}/api/chat",
+                            json={"model": _sum_cfg["id"],
+                                  "messages": [{"role": "user", "content": _sum_prompt}],
+                                  "stream": False,
+                                  "options": {"num_predict": 1500, "temperature": 0.3}},
+                            timeout=300, verify=False)
+                        if _resp.status_code == 200:
+                            _txt = _resp.json().get("message", {}).get("content", "")
+                            st.session_state.summary_text = _txt
+                        else:
+                            st.error(f"Ollama HTTP {_resp.status_code}: {_resp.text[:200]}")
+                    except Exception as _e:
+                        st.error(f"Ollama エラー: {_e}")
+                else:
+                    # NIM API
+                    r = nim_text_summarize(st.session_state.analysis_log,
+                                           sum_model_name.replace(" [NIM]", ""))
+                    if r["ok"]:
+                        st.session_state.summary_text = r["text"]
+                    else:
+                        st.error(r["text"])
+
+                # 自動保存
+                if st.session_state.summary_text:
+                    try:
+                        _ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+                        _sf = SUMMARY_DIR / f"summary_{_ts}.txt"
+                        _sf.write_text(st.session_state.summary_text, encoding="utf-8")
+                    except Exception:
+                        pass
+
     if st.session_state.summary_text:
-        st.markdown(f"<div class='analysis-card'><div class='analysis-body'>"
-                    f"{st.session_state.summary_text}</div></div>", unsafe_allow_html=True)
+        st.markdown(
+            f"<div class='analysis-card'><div class='analysis-body'>"
+            f"{st.session_state.summary_text}</div></div>",
+            unsafe_allow_html=True)
         _dl_ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         st.download_button("📥 Download", data=st.session_state.summary_text,
                            file_name=f"summary_{_dl_ts}.txt", mime="text/plain")
@@ -1418,132 +1468,6 @@ with tab_log:
     else:
         st.info("ログなし")
 
-# ────────────────────────────────────────────────────────────
-# TAB: PERFORMANCE
-# ────────────────────────────────────────────────────────────
-with tab_perf:
-    st.markdown("<div class='panel-title'>GPU vs CPU Performance</div>", unsafe_allow_html=True)
-    if st.session_state.perf_history:
-        import pandas as pd
-        gpu_r = [r for r in st.session_state.perf_history if r["mode"]=="GPU"]
-        cpu_r = [r for r in st.session_state.perf_history if r["mode"]=="CPU"]
-        m1,m2,m3,m4 = st.columns(4)
-        with m1: st.metric("GPU Avg Latency",
-                            f"{sum(r['latency'] for r in gpu_r)/len(gpu_r):.2f}s" if gpu_r else "—")
-        with m2: st.metric("CPU Avg Latency",
-                            f"{sum(r['latency'] for r in cpu_r)/len(cpu_r):.2f}s" if cpu_r else "—")
-        with m3:
-            if gpu_r and cpu_r:
-                ag=sum(r["latency"] for r in gpu_r)/len(gpu_r)
-                ac=sum(r["latency"] for r in cpu_r)/len(cpu_r)
-                st.metric("Speedup", f"{ac/ag:.1f}×" if ag>0 else "—")
-            else: st.metric("Speedup","—")
-        with m4: st.metric("Samples", len(st.session_state.perf_history))
-        df  = pd.DataFrame(st.session_state.perf_history)
-        df["idx"] = range(len(df))
-        gdf = df[df["mode"]=="GPU"][["idx","latency"]].rename(columns={"latency":"GPU(s)"})
-        cdf = df[df["mode"]=="CPU"][["idx","latency"]].rename(columns={"latency":"CPU(s)"})
-        merged = pd.merge(gdf, cdf, on="idx", how="outer").set_index("idx")
-        if not merged.empty: st.line_chart(merged)
-        if st.button("🗑 Clear"): st.session_state.perf_history=[]; st.rerun()
-    else:
-        st.info("GPU/CPU モードを切り替えながら分析を実行するとグラフが表示されます。")
-
-# ────────────────────────────────────────────────────────────
-# TAB: LIVE FEED (HD Detection View · TV Projection)
-# ────────────────────────────────────────────────────────────
-with tab_hd:
-
-    st.markdown("""
-    <style>
-    .hd-header {
-        font-family: 'Orbitron', monospace;
-        font-size: 0.72rem; letter-spacing: 0.14em;
-        color: #00b4d8; text-transform: uppercase; margin-bottom: 4px;
-    }
-    .hd-badge {
-        display: inline-block; background: #00b4d8; color: #010d1a;
-        font-size: 0.58rem; font-weight: 700; letter-spacing: 0.1em;
-        padding: 2px 8px; margin-left: 8px; border-radius: 2px;
-    }
-    .hd-badge.green { background: #06d6a0; }
-    .hd-info {
-        font-family: 'Share Tech Mono', monospace; font-size: 0.62rem;
-        color: #1a6080; letter-spacing: 0.08em; margin-top: 4px; margin-bottom: 10px;
-    }
-    .hd-det-bar {
-        display: flex; flex-wrap: wrap; gap: 6px;
-        padding: 6px 10px; background: #020f1f;
-        border: 1px solid #0a2a45; border-radius: 2px; margin-top: 8px;
-        font-family: 'Share Tech Mono', monospace; font-size: 0.6rem;
-    }
-    .hd-det-item { color: #00b4d8; }
-    .hd-det-count { color: #06d6a0; margin-left: 4px; font-weight: bold; }
-    </style>
-    <div class="hd-header">
-        HD DETECTION FEED
-        <span class="hd-badge">RT-DETR</span>
-        <span class="hd-badge green">HIGH RESOLUTION</span>
-    </div>
-    <div class="hd-info">
-        DETECTION OVERLAY · SHARED PROCESSING FROM LIVE DETECTION TAB · OPTIMIZED FOR 42"+ DISPLAY
-    </div>
-    """, unsafe_allow_html=True)
-
-    _hd_frame = st.session_state.get("latest_annotated_frame")
-    _hd_det   = st.session_state.get("latest_det_result", {})
-
-    if _hd_frame is not None:
-        # 高解像度表示（フル幅）
-        st.image(_hd_frame, channels="RGB", use_container_width=True)
-
-        # 検出サマリーバー
-        _det_summary = ""
-        for ver in ("v1", "v2"):
-            dets = _hd_det.get(ver, [])
-            if dets:
-                # ラベルごとのカウント集計
-                from collections import Counter
-                counts = Counter(d["label"] for d in dets)
-                items = " &nbsp;·&nbsp; ".join(
-                    f'<span class="hd-det-item">{lbl}</span>'
-                    f'<span class="hd-det-count">×{cnt}</span>'
-                    for lbl, cnt in counts.most_common(6)
-                )
-                cfg = DETECTION_MODELS[ver]
-                _det_summary += (
-                    f'<span style="color:{cfg["color_hex"]};margin-right:8px">'
-                    f'[{ver.upper()}]</span>{items} &nbsp;&nbsp; '
-                )
-
-        if _det_summary:
-            st.markdown(
-                f"<div class='hd-det-bar'>{_det_summary}</div>",
-                unsafe_allow_html=True
-            )
-    elif st.session_state.get("processing"):
-        st.markdown("""
-        <div style="display:flex;align-items:center;justify-content:center;
-             height:200px;background:#020f1f;border:1px solid #0a2a45;
-             font-family:'Orbitron',monospace;font-size:0.7rem;color:#1a6080;
-             letter-spacing:0.1em;text-transform:uppercase;">
-            ⏳ &nbsp; WAITING FOR FIRST FRAME...
-        </div>
-        """, unsafe_allow_html=True)
-    else:
-        st.markdown("""
-        <div style="display:flex;flex-direction:column;align-items:center;
-             justify-content:center;height:380px;background:#020f1f;
-             border:1px solid #0a2a45;border-radius:2px;
-             font-family:'Orbitron',monospace;font-size:0.75rem;
-             color:#1a6080;letter-spacing:0.1em;text-transform:uppercase;gap:12px;">
-            <div style="font-size:2.5rem">📡</div>
-            <div>NO ACTIVE FEED</div>
-            <div style="font-size:0.58rem;color:#0a3040;font-family:'Share Tech Mono',monospace">
-                START DETECTION IN LIVE DETECTION TAB · THIS VIEW UPDATES AUTOMATICALLY
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
 st.markdown(
     "<div class='vit-footer'>"
     "VIDEO INTELLIGENCE TERMINAL &nbsp;|&nbsp;"
