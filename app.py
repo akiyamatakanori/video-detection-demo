@@ -1230,24 +1230,33 @@ with tab_live:
                 if det_html:
                     det_ph.markdown(det_html, unsafe_allow_html=True)
 
-                # ③ VLM 分析（バックグラウンドスレッドで非同期実行）
+                # ③ VLM 分析（インターバル毎・同期実行）
                 now = time.time()
+                if now - last_vlm_time >= vlm_interval:
+                    last_vlm_time = now
+                    ts_str = datetime.now().strftime("%H:%M:%S")
+                    render_status("ANALYZING")
 
-                # 前回のスレッドが完了していたら結果を表示
-                with _vlm_lock:
-                    _done = _vlm_result["done"]
-                    _res  = _vlm_result["result"]
-                    _ts   = _vlm_result["ts"]
+                    result = vlm_analyze(
+                        frame_rgb,
+                        st.session_state.current_prompt,
+                        st.session_state.selected_model,
+                        resize_pct=resize_pct,
+                        max_tokens=max_tokens,
+                        temperature=temperature,
+                        top_k=top_k,
+                        top_p=top_p,
+                    )
 
-                if _done and _res is not None:
-                    lat_str = f"{_res['latency']:.2f}s"
+                    lat_str = f"{result['latency']:.2f}s"
                     st.session_state.latest_latency = lat_str
-                    if _res["ok"]:
-                        st.session_state.latest_analysis = _res["text"]
+
+                    if result["ok"]:
+                        st.session_state.latest_analysis = result["text"]
                         entry = {
-                            "ts": _ts, "frame_idx": frame_idx,
-                            "text": _res["text"], "img_b64": _res.get("img_b64",""),
-                            "latency": _res["latency"],
+                            "ts": ts_str, "frame_idx": frame_idx,
+                            "text": result["text"], "img_b64": result.get("img_b64",""),
+                            "latency": result["latency"],
                             "model": st.session_state.selected_model,
                             "mode": _mode_str, "device": _device,
                         }
@@ -1255,8 +1264,8 @@ with tab_live:
                         st.session_state.total_frames_analyzed += 1
                         st.session_state.highlights = detect_highlights(st.session_state.analysis_log)
                         st.session_state.perf_history.append({
-                            "mode": _mode_str, "latency": _res["latency"],
-                            "ts": _ts, "model": st.session_state.selected_model,
+                            "mode": _mode_str, "latency": result["latency"],
+                            "ts": ts_str, "model": st.session_state.selected_model,
                         })
                         if len(st.session_state.perf_history) > 100:
                             st.session_state.perf_history = st.session_state.perf_history[-100:]
@@ -1270,32 +1279,13 @@ with tab_live:
                             pass
                         ai_ph.markdown(
                             f"<div class='analysis-card'>"
-                            f"<div class='analysis-ts'>[{_ts}] Frame {frame_idx} | {lat_str} | {_mode_str}/{_device.upper()}</div>"
-                            f"<div class='analysis-body'>{_res['text']}</div>"
+                            f"<div class='analysis-ts'>[{ts_str}] Frame {frame_idx} | {lat_str} | {_mode_str}/{_device.upper()}</div>"
+                            f"<div class='analysis-body'>{result['text']}</div>"
                             f"</div>", unsafe_allow_html=True)
                     else:
-                        ai_ph.error(_res["text"])
-                    with _vlm_lock:
-                        _vlm_result["result"] = None
+                        ai_ph.error(result["text"])
                     render_status("RUNNING")
 
-                # インターバル経過 & スレッド未実行なら新規スレッド起動
-                if _done and now - last_vlm_time >= vlm_interval:
-                    last_vlm_time = now
-                    ts_str = datetime.now().strftime("%H:%M:%S")
-                    render_status("ANALYZING")
-                    with _vlm_lock:
-                        _vlm_result["done"] = False
-                    t = threading.Thread(
-                        target=_vlm_worker,
-                        args=(frame_rgb.copy(), st.session_state.current_prompt,
-                              st.session_state.selected_model, resize_pct, max_tokens,
-                              temperature, top_k, top_p, ts_str),
-                        daemon=True,
-                    )
-                    t.start()
-
-                time.sleep(0.03)  # ~30fps
                 time.sleep(0.03)
 
             cap.release()
