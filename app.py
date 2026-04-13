@@ -599,6 +599,20 @@ for _k, _v in _defaults.items():
     if _k not in st.session_state:
         st.session_state[_k] = _v
 
+# ── 起動時にOllamaの残留モデルをアンロード（KEEP_ALIVE=0でも念のため）──
+if "ollama_reset_done" not in st.session_state:
+    try:
+        requests.delete(f"{OLLAMA_URL}/api/delete",
+                        json={"model": ""}, timeout=3, verify=False)
+    except Exception:
+        pass
+    # Ollamaへの空リクエストでキャッシュをフラッシュ
+    try:
+        requests.get(f"{OLLAMA_URL}/api/tags", timeout=3, verify=False)
+    except Exception:
+        pass
+    st.session_state["ollama_reset_done"] = True
+
 # ─────────────────────────────────────────────
 # デバイス判定
 # ─────────────────────────────────────────────
@@ -614,7 +628,7 @@ _cur_device = get_device(st.session_state.use_gpu)
 # ─────────────────────────────────────────────
 # ヘッダー行
 # ─────────────────────────────────────────────
-hdr_col, tog_gpu_col = st.columns([6, 1])
+hdr_col, tog_col = st.columns([6, 1])
 
 with hdr_col:
     st.markdown("""
@@ -630,15 +644,18 @@ with hdr_col:
     </div>
     """, unsafe_allow_html=True)
 
-# ── GPU トグル（ON=GPU起動 / OFF=CPU切替え再起動）──
-with tog_gpu_col:
-    st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+with tog_col:
+    st.markdown("<div style='height:4px'></div>", unsafe_allow_html=True)
+    # ── GPU トグル（設定・URLはリセットしない）──
     _new_gpu = st.toggle("GPU", value=st.session_state.use_gpu, key="gpu_toggle")
     if _new_gpu != st.session_state.use_gpu:
-        st.session_state.use_gpu       = _new_gpu
-        st.session_state.processing    = True   # 自動START
-        st.session_state.selected_model = GPU_DEFAULT_MODEL if _new_gpu else CPU_DEFAULT_MODEL
+        st.session_state.use_gpu = _new_gpu
         st.cache_resource.clear()
+        st.rerun()
+    # ── START / STOP トグル ──
+    _new_proc = st.toggle("START", value=st.session_state.processing, key="start_toggle")
+    if _new_proc != st.session_state.processing:
+        st.session_state.processing = _new_proc
         st.rerun()
 
 # ── バナー ──
@@ -1174,7 +1191,7 @@ with tab_live:
             frame_idx      = 0
             det_result     = {"v1":[], "v2":[], "error": None}
             _device        = get_device(st.session_state.use_gpu)
-            _det_interval  = 5   # RT-DETRは5フレームに1回
+            _det_interval  = 8   # RT-DETRは8フレームに1回（速度優先）
             _det_counter   = 0
 
             while st.session_state.processing:
