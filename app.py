@@ -283,6 +283,116 @@ st.markdown("""
 div[data-testid="stSidebar"] { background: #020f1f; border-right: 1px solid #0a2a45; }
 div[data-testid="stSidebar"] * { color: #8ab8cc !important; }
 
+/* ── サイドバー ウィジェット統一スタイル ── */
+/* テキスト入力 */
+div[data-testid="stSidebar"] input[type="text"],
+div[data-testid="stSidebar"] input[type="url"],
+div[data-testid="stSidebar"] textarea {
+    background: #010d1a !important;
+    border: 1px solid #0a3a60 !important;
+    border-radius: 3px !important;
+    color: #00b4d8 !important;
+    font-family: 'Share Tech Mono', monospace !important;
+    font-size: 0.72rem !important;
+}
+div[data-testid="stSidebar"] input[type="text"]:focus,
+div[data-testid="stSidebar"] textarea:focus {
+    border-color: #00b4d8 !important;
+    box-shadow: 0 0 8px rgba(0,180,216,0.3) !important;
+}
+/* ボタン */
+div[data-testid="stSidebar"] button[kind="primary"],
+div[data-testid="stSidebar"] button[data-testid="baseButton-primary"] {
+    background: linear-gradient(135deg, #003a55, #005a80) !important;
+    border: 1px solid #00b4d8 !important;
+    color: #00b4d8 !important;
+    font-family: 'Orbitron', monospace !important;
+    font-size: 0.6rem !important;
+    font-weight: 700 !important;
+    letter-spacing: 0.1em !important;
+    border-radius: 2px !important;
+}
+div[data-testid="stSidebar"] button:not([kind="primary"]) {
+    background: #010d1a !important;
+    border: 1px solid #0a3a60 !important;
+    color: #8ab8cc !important;
+    font-family: 'Orbitron', monospace !important;
+    font-size: 0.58rem !important;
+    border-radius: 2px !important;
+}
+div[data-testid="stSidebar"] button:hover {
+    border-color: #00b4d8 !important;
+    color: #00b4d8 !important;
+}
+/* ラジオボタン */
+div[data-testid="stSidebar"] [data-testid="stRadio"] label {
+    font-family: 'Rajdhani', sans-serif !important;
+    font-size: 0.78rem !important;
+    color: #8ab8cc !important;
+}
+div[data-testid="stSidebar"] [data-testid="stRadio"] [data-testid="stMarkdownContainer"] p {
+    font-family: 'Rajdhani', sans-serif !important;
+}
+/* セレクトボックス */
+div[data-testid="stSidebar"] [data-testid="stSelectbox"] > div > div {
+    background: #010d1a !important;
+    border: 1px solid #0a3a60 !important;
+    color: #00b4d8 !important;
+    font-family: 'Share Tech Mono', monospace !important;
+    font-size: 0.65rem !important;
+    border-radius: 2px !important;
+}
+/* スライダー */
+div[data-testid="stSidebar"] [data-testid="stSlider"] div[data-baseweb="slider"] div {
+    background: #0a3a60 !important;
+}
+div[data-testid="stSidebar"] [data-testid="stSlider"] div[data-baseweb="slider"] div[role="slider"] {
+    background: #00b4d8 !important;
+    border-color: #00b4d8 !important;
+}
+div[data-testid="stSidebar"] .stSlider span {
+    color: #00b4d8 !important;
+    font-family: 'Share Tech Mono', monospace !important;
+    font-size: 0.65rem !important;
+}
+/* トグル */
+div[data-testid="stSidebar"] [data-testid="stToggle"] span {
+    font-family: 'Orbitron', monospace !important;
+    font-size: 0.58rem !important;
+}
+/* divider */
+div[data-testid="stSidebar"] hr {
+    border-color: #0a2a45 !important;
+}
+/* キャプション */
+div[data-testid="stSidebar"] [data-testid="stCaptionContainer"] p {
+    font-family: 'Share Tech Mono', monospace !important;
+    font-size: 0.6rem !important;
+    color: #1a6080 !important;
+}
+/* テキストエリア */
+div[data-testid="stSidebar"] textarea {
+    background: #010d1a !important;
+    border: 1px solid #0a3a60 !important;
+    color: #8ab8cc !important;
+    font-family: 'Share Tech Mono', monospace !important;
+    font-size: 0.65rem !important;
+}
+/* ドロップダウンメニュー */
+ul[data-testid="stSelectboxVirtualDropdown"] {
+    background: #010d1a !important;
+    border: 1px solid #00b4d8 !important;
+}
+ul[data-testid="stSelectboxVirtualDropdown"] li {
+    color: #8ab8cc !important;
+    font-family: 'Share Tech Mono', monospace !important;
+    font-size: 0.65rem !important;
+}
+ul[data-testid="stSelectboxVirtualDropdown"] li:hover {
+    background: #0a3a60 !important;
+    color: #00b4d8 !important;
+}
+
 /* ── ヘッダー ── */
 .vit-header {
     background: linear-gradient(135deg, #010d1a 0%, #021a35 40%, #02244a 100%);
@@ -482,6 +592,8 @@ _defaults = {
     "perf_history":          [],
     "latest_analysis":       "",
     "latest_latency":        "—",
+    "latest_annotated_frame": None,
+    "latest_det_result":     {},
 }
 for _k, _v in _defaults.items():
     if _k not in st.session_state:
@@ -1096,6 +1208,10 @@ with tab_live:
                     {k:v for k,v in det_result.items() if k in ("v1","v2")})
                 frame_ph.image(annotated, channels="RGB", use_container_width=True)
 
+                # 最新フレームをsession_stateに保存（LIVE FEEDタブ用）
+                st.session_state.latest_annotated_frame = annotated
+                st.session_state.latest_det_result = det_result
+
                 # ② 検知リスト
                 det_html = ""
                 for ver in ("v1","v2"):
@@ -1327,150 +1443,97 @@ with tab_perf:
         st.info("GPU/CPU モードを切り替えながら分析を実行するとグラフが表示されます。")
 
 # ────────────────────────────────────────────────────────────
-# TAB: LIVE FEED (HD · TV Projection)
+# TAB: LIVE FEED (HD Detection View · TV Projection)
 # ────────────────────────────────────────────────────────────
 with tab_hd:
-    import streamlit.components.v1 as components
-
-    # YouTube動画IDを抽出するユーティリティ
-    def _extract_yt_id(url):
-        if not url: return None
-        import re
-        m = re.search(r'(?:v=|youtu\.be/|live/)([A-Za-z0-9_-]{11})', url)
-        return m.group(1) if m else None
 
     st.markdown("""
     <style>
     .hd-header {
-        font-family: 'Rajdhani', 'Orbitron', monospace;
-        font-size: 0.75rem;
-        letter-spacing: 0.12em;
-        color: #00b4d8;
-        text-transform: uppercase;
-        margin-bottom: 8px;
+        font-family: 'Orbitron', monospace;
+        font-size: 0.72rem; letter-spacing: 0.14em;
+        color: #00b4d8; text-transform: uppercase; margin-bottom: 4px;
     }
     .hd-badge {
-        display: inline-block;
-        background: #00b4d8;
-        color: #010d1a;
-        font-size: 0.6rem;
-        font-weight: 700;
-        letter-spacing: 0.1em;
-        padding: 2px 8px;
-        margin-left: 8px;
-        border-radius: 2px;
+        display: inline-block; background: #00b4d8; color: #010d1a;
+        font-size: 0.58rem; font-weight: 700; letter-spacing: 0.1em;
+        padding: 2px 8px; margin-left: 8px; border-radius: 2px;
     }
+    .hd-badge.green { background: #06d6a0; }
     .hd-info {
-        font-family: 'Rajdhani', monospace;
-        font-size: 0.65rem;
-        color: #1a6080;
-        letter-spacing: 0.08em;
-        margin-top: 6px;
+        font-family: 'Share Tech Mono', monospace; font-size: 0.62rem;
+        color: #1a6080; letter-spacing: 0.08em; margin-top: 4px; margin-bottom: 10px;
     }
+    .hd-det-bar {
+        display: flex; flex-wrap: wrap; gap: 6px;
+        padding: 6px 10px; background: #020f1f;
+        border: 1px solid #0a2a45; border-radius: 2px; margin-top: 8px;
+        font-family: 'Share Tech Mono', monospace; font-size: 0.6rem;
+    }
+    .hd-det-item { color: #00b4d8; }
+    .hd-det-count { color: #06d6a0; margin-left: 4px; font-weight: bold; }
     </style>
     <div class="hd-header">
-        HIGH RESOLUTION LIVE FEED
-        <span class="hd-badge">HD</span>
-        <span class="hd-badge" style="background:#06d6a0">TV PROJECTION</span>
+        HD DETECTION FEED
+        <span class="hd-badge">RT-DETR</span>
+        <span class="hd-badge green">HIGH RESOLUTION</span>
     </div>
     <div class="hd-info">
-        OPTIMIZED FOR 42"+ DISPLAY · YOUTUBE NATIVE PLAYER · 1080p / 4K AUTO
+        DETECTION OVERLAY · SHARED PROCESSING FROM LIVE DETECTION TAB · OPTIMIZED FOR 42"+ DISPLAY
     </div>
     """, unsafe_allow_html=True)
 
-    _yt_url = st.session_state.get("youtube_url", "")
-    _yt_id  = _extract_yt_id(_yt_url)
+    _hd_frame = st.session_state.get("latest_annotated_frame")
+    _hd_det   = st.session_state.get("latest_det_result", {})
 
-    if _yt_id:
-        # YouTubeネイティブプレーヤーをフル幅で埋め込み（最高画質自動選択）
-        _embed_html = f"""
-        <style>
-          body {{ margin:0; padding:0; background:#010d1a; }}
-          .yt-wrapper {{
-            position: relative;
-            width: 100%;
-            padding-bottom: 56.25%;
-            background: #010d1a;
-          }}
-          .yt-wrapper iframe {{
-            position: absolute;
-            top: 0; left: 0;
-            width: 100%;
-            height: 100%;
-            border: 1px solid #00b4d8;
-          }}
-          .yt-label {{
-            font-family: 'Courier New', monospace;
-            font-size: 11px;
-            color: #00b4d8;
-            letter-spacing: 0.1em;
-            text-transform: uppercase;
-            padding: 4px 0 8px 2px;
-            background: #010d1a;
-          }}
-        </style>
-        <div class="yt-label">▶ LIVE SOURCE · {_yt_url}</div>
-        <div class="yt-wrapper">
-          <iframe
-            src="https://www.youtube.com/embed/{_yt_id}?autoplay=1&controls=1&rel=0&modestbranding=1&vq=hd1080&playsinline=1"
-            allow="autoplay; encrypted-media; fullscreen"
-            allowfullscreen>
-          </iframe>
-        </div>
-        <div class="yt-label" style="margin-top:6px">
-          STREAM ID: {_yt_id} &nbsp;·&nbsp; RESOLUTION: AUTO (UP TO 4K) &nbsp;·&nbsp;
-          TIP: PRESS F11 FOR FULLSCREEN PROJECTION
-        </div>
-        """
-        components.html(_embed_html, height=700, scrolling=False)
+    if _hd_frame is not None:
+        # 高解像度表示（フル幅）
+        st.image(_hd_frame, channels="RGB", use_container_width=True)
 
-    elif st.session_state.get("stream_url") or st.session_state.get("video_file"):
-        # ローカルファイル／非YouTube URLの場合はcv2でHD表示
+        # 検出サマリーバー
+        _det_summary = ""
+        for ver in ("v1", "v2"):
+            dets = _hd_det.get(ver, [])
+            if dets:
+                # ラベルごとのカウント集計
+                from collections import Counter
+                counts = Counter(d["label"] for d in dets)
+                items = " &nbsp;·&nbsp; ".join(
+                    f'<span class="hd-det-item">{lbl}</span>'
+                    f'<span class="hd-det-count">×{cnt}</span>'
+                    for lbl, cnt in counts.most_common(6)
+                )
+                cfg = DETECTION_MODELS[ver]
+                _det_summary += (
+                    f'<span style="color:{cfg["color_hex"]};margin-right:8px">'
+                    f'[{ver.upper()}]</span>{items} &nbsp;&nbsp; '
+                )
+
+        if _det_summary:
+            st.markdown(
+                f"<div class='hd-det-bar'>{_det_summary}</div>",
+                unsafe_allow_html=True
+            )
+    elif st.session_state.get("processing"):
         st.markdown("""
-        <div class="hd-info" style="color:#ffd166">
-            ⚠ NON-YOUTUBE SOURCE DETECTED · USING FRAME CAPTURE MODE
+        <div style="display:flex;align-items:center;justify-content:center;
+             height:200px;background:#020f1f;border:1px solid #0a2a45;
+             font-family:'Orbitron',monospace;font-size:0.7rem;color:#1a6080;
+             letter-spacing:0.1em;text-transform:uppercase;">
+            ⏳ &nbsp; WAITING FOR FIRST FRAME...
         </div>
         """, unsafe_allow_html=True)
-
-        _hd_src = st.session_state.get("stream_url") or st.session_state.get("video_file")
-        if st.button("▶ START HD CAPTURE", type="primary"):
-            _hd_cap = cv2.VideoCapture(_hd_src)
-            _hd_ph  = st.empty()
-            _hd_stop = st.button("■ STOP", key="hd_stop")
-            for _ in range(300):
-                if _hd_stop: break
-                ret, frm = _hd_cap.read()
-                if not ret: break
-                _hd_ph.image(cv2.cvtColor(frm, cv2.COLOR_BGR2RGB),
-                             channels="RGB", use_container_width=True)
-            _hd_cap.release()
     else:
-        # ソース未設定の場合
         st.markdown("""
-        <style>
-        .hd-placeholder {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            height: 420px;
-            border: 1px solid #0a3040;
-            background: #020f1f;
-            color: #1a6080;
-            font-family: 'Rajdhani', monospace;
-            font-size: 0.9rem;
-            letter-spacing: 0.1em;
-            text-transform: uppercase;
-        }
-        .hd-placeholder .icon { font-size: 3rem; margin-bottom: 16px; }
-        .hd-placeholder .sub { font-size: 0.65rem; color: #0a3040; margin-top: 8px; }
-        </style>
-        <div class="hd-placeholder">
-            <div class="icon">📺</div>
-            <div>NO SOURCE CONNECTED</div>
-            <div class="sub">CONNECT A YOUTUBE LIVE URL IN THE SIDEBAR TO BEGIN HD PROJECTION</div>
-            <div class="sub" style="margin-top:16px; color:#00b4d8">
-                SIDEBAR → INPUT SOURCE → YOUTUBE (LIVE) → PASTE URL → CONNECT
+        <div style="display:flex;flex-direction:column;align-items:center;
+             justify-content:center;height:380px;background:#020f1f;
+             border:1px solid #0a2a45;border-radius:2px;
+             font-family:'Orbitron',monospace;font-size:0.75rem;
+             color:#1a6080;letter-spacing:0.1em;text-transform:uppercase;gap:12px;">
+            <div style="font-size:2.5rem">📡</div>
+            <div>NO ACTIVE FEED</div>
+            <div style="font-size:0.58rem;color:#0a3040;font-family:'Share Tech Mono',monospace">
+                START DETECTION IN LIVE DETECTION TAB · THIS VIEW UPDATES AUTOMATICALLY
             </div>
         </div>
         """, unsafe_allow_html=True)
