@@ -586,7 +586,7 @@ _defaults = {
     "mode":                  "YouTube",
     "highlights":            [],
     "local_folder":          DEFAULT_FOLDER,
-    "det_v1_enabled":        True,
+    "det_v1_enabled":        False,
     "det_v2_enabled":        True,
     "use_gpu":               True,
     "perf_history":          [],
@@ -1079,7 +1079,7 @@ with st.sidebar:
     st.divider()
     st.markdown("<div class='section-label'>Analysis Settings</div>", unsafe_allow_html=True)
     vlm_interval = st.slider("VLM Interval (s)", 1, 30, 5, 1)
-    max_tokens   = st.slider("Max Tokens", 100, 800, 600 if st.session_state.use_gpu else 300, 50)
+    max_tokens   = st.slider("Max Tokens", 100, 800, 300 if st.session_state.use_gpu else 200, 50)
     resize_pct   = st.slider("Image Resize (%)", 20, 100, 80 if st.session_state.use_gpu else 60, 10)
 
     st.markdown("<div class='section-label' style='margin-top:8px'>Generation Parameters</div>",
@@ -1197,7 +1197,7 @@ with tab_live:
             while st.session_state.processing:
                 # ライブ時：バッファを複数フレーム読み飛ばして遅延を削減
                 if st.session_state.mode == "Live":
-                    for _ in range(5):
+                    for _ in range(10):
                         cap.grab()
                 ret, frame = cap.read()
                 if not ret:
@@ -1330,11 +1330,20 @@ with tab_search:
     if st.session_state.search_results:
         st.info(f"{len(st.session_state.search_results)} 件")
         for e in st.session_state.search_results:
-            st.markdown(
-                f"<div class='analysis-card'>"
-                f"<div class='analysis-ts'>[{e['ts']}] Frame {e['frame_idx']} | {e.get('mode','—')}</div>"
-                f"<div class='analysis-body'>{highlight_text(e['text'],query)}</div>"
-                f"</div>", unsafe_allow_html=True)
+            c1, c2 = st.columns([1, 2])
+            with c1:
+                if e.get("img_b64"):
+                    try:
+                        st.image(Image.open(io.BytesIO(base64.b64decode(e["img_b64"]))),
+                                 use_container_width=True)
+                    except Exception:
+                        pass
+            with c2:
+                st.markdown(
+                    f"<div class='analysis-card'>"
+                    f"<div class='analysis-ts'>[{e['ts']}] Frame {e['frame_idx']} | {e.get('mode','—')}</div>"
+                    f"<div class='analysis-body'>{highlight_text(e['text'],query)}</div>"
+                    f"</div>", unsafe_allow_html=True)
     elif query:
         st.info("該当なし")
 
