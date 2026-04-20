@@ -599,20 +599,6 @@ for _k, _v in _defaults.items():
     if _k not in st.session_state:
         st.session_state[_k] = _v
 
-# ── 起動時にOllamaの残留モデルをアンロード（KEEP_ALIVE=0でも念のため）──
-if "ollama_reset_done" not in st.session_state:
-    try:
-        requests.delete(f"{OLLAMA_URL}/api/delete",
-                        json={"model": ""}, timeout=3, verify=False)
-    except Exception:
-        pass
-    # Ollamaへの空リクエストでキャッシュをフラッシュ
-    try:
-        requests.get(f"{OLLAMA_URL}/api/tags", timeout=3, verify=False)
-    except Exception:
-        pass
-    st.session_state["ollama_reset_done"] = True
-
 # ─────────────────────────────────────────────
 # デバイス判定
 # ─────────────────────────────────────────────
@@ -787,11 +773,15 @@ def ollama_analyze(frame_rgb, prompt, model_id, resize_pct, max_tokens,
                    temperature=0.2, top_k=40, top_p=0.9):
     """
     Ollama /api/chat 形式で推論。
-    content は string、images は別フィールドで渡す（Ollama互換形式）。
+    表示用フレームはフル解像度を維持し、VLM送信用のみ縮小する。
     """
-    if resize_pct < 100:
-        frame_rgb = resize_frame(frame_rgb, resize_pct)
-    img_b64 = frame_to_base64(frame_rgb)
+    # ★ VLM送信用のみ50%に縮小（表示用フレームは変更しない）
+    vlm_resize = min(resize_pct, 50)
+    vlm_frame  = resize_frame(frame_rgb, vlm_resize)
+    img_b64    = frame_to_base64(vlm_frame)
+    # img_b64_display は検索表示用にオリジナルサイズで保存
+    img_b64_display = frame_to_base64(resize_frame(frame_rgb, resize_pct)) \
+                      if resize_pct < 100 else frame_to_base64(frame_rgb)
     t0 = time.time()
     try:
         payload = {
@@ -801,9 +791,16 @@ def ollama_analyze(frame_rgb, prompt, model_id, resize_pct, max_tokens,
                 "content": prompt,
                 "images":  [img_b64],
             }],
-            "stream": False,
-            "options": {"num_predict": max_tokens, "temperature": temperature,
-                        "top_k": top_k, "top_p": top_p},
+            "stream":     False,
+            "keep_alive": 300,   # ★ 5分間モデルをVRAMに保持（再ロード不要）
+            "options": {
+                "num_predict": max_tokens,
+                "temperature": temperature,
+                "top_k":       top_k,
+                "top_p":       top_p,
+                "num_ctx":     2048,   # ★ コンテキスト長を削減（高速化）
+                "num_gpu":     99,     # ★ 全レイヤーをGPUにオフロード
+            },
         }
         resp = requests.post(
             f"{OLLAMA_URL}/api/chat",
@@ -813,7 +810,7 @@ def ollama_analyze(frame_rgb, prompt, model_id, resize_pct, max_tokens,
             data = resp.json()
             text = (data.get("message", {}).get("content", "")
                     or data.get("response", ""))
-            return {"ok": True, "text": text, "latency": lat, "img_b64": img_b64}
+            return {"ok": True, "text": text, "latency": lat, "img_b64": img_b64_display}
         if resp.status_code == 404:
             return {"ok": False, "text": f"モデル未インストール: ollama pull {model_id}", "latency": lat}
         return {"ok": False, "text": f"Ollama HTTP {resp.status_code}: {resp.text[:200]}", "latency": lat}
