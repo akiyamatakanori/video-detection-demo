@@ -1192,6 +1192,15 @@ with tab_live:
             _det_counter   = 0
 
             while st.session_state.processing:
+                # ── ai_ph を毎ループ先頭で latest_analysis から常時描画（消えない）──
+                if st.session_state.latest_analysis:
+                    _lat = st.session_state.latest_latency
+                    ai_ph.markdown(
+                        f"<div class='analysis-card'>"
+                        f"<div class='analysis-ts'>{_lat} | {_mode_str}/{get_device(st.session_state.use_gpu).upper()}</div>"
+                        f"<div class='analysis-body'>{st.session_state.latest_analysis}</div>"
+                        f"</div>", unsafe_allow_html=True)
+
                 # ライブ時：バッファを複数フレーム読み飛ばして遅延を削減
                 if st.session_state.mode == "Live":
                     for _ in range(10):
