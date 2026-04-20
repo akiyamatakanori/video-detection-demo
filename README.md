@@ -9,12 +9,10 @@ NVIDIA NIM APIとのハイブリッド動作対応。
 ---
 
 - **LIVE DETECTION**: ライブストリーム映像のRT-DETR物体検出 + VLMによる日本語シーン説明
-- **VIDEO SEARCH**: LLMによるアノテーション（タグ）の検索
-- **SUMMARIZATION**: LLMによる要約作成
+- **VIDEO SEARCH**: 分析ログのキーワード検索（画像付き）
+- **SUMMARIZATION**: OllamaローカルモデルまたはNIM APIによる要約作成
 - **HIGHLIGHTS**: ハイライトの抽出
 - **ANALYSIS LOG**: フレーム分割したログ履歴
-- **PERFORMANCE**: GPU / CPU モード別レイテンシ比較
-- **LIVE FEED** *(NEW)*: 高解像度YouTube埋め込みプレーヤー（42インチ以上のTV投影用）
 
 ---
 
@@ -30,6 +28,7 @@ http://10.71.129.9:8503
 - SSHトンネル不要
 - 誰のPCからでもアクセス可能
 - 両サーバーはサーバー起動時に自動起動
+- 複数端末からの同時アクセス可能（同時にSTARTする場合は推論速度が低下します）
 
 ---
 
@@ -38,9 +37,9 @@ http://10.71.129.9:8503
 | 機能 | モデル | 動作場所 |
 |---|---|---|
 | 物体検出（バウンディングボックス） | RT-DETR v1/v2 | GPU Server（CUDA H100 / CPU 切替） |
-| 日本語シーン説明 | Qwen2.5-VL 32B 等 | GPU Server（Ollama / localhost） |
+| 日本語シーン説明 | Qwen2.5-VL 7B 等 | GPU Server（Ollama / localhost） |
 | 高精度VLM | Llama 4 / Phi-4 等 | NVIDIA NIM API（クラウド） |
-| テキスト要約 | Llama 3.3 70B 等 | NVIDIA NIM API（クラウド） |
+| テキスト要約 | Ollama全モデル / NIM API | GPU Server または クラウド |
 
 ### アーキテクチャ
 
@@ -52,9 +51,9 @@ video-ai-demo (10.71.129.9)
         ↓ 自動転送
 GPU サーバー (192.168.11.111 / ailab5)
   ├── Streamlit アプリ (app.py) ← systemd・自動起動
-  ├── RT-DETR v1/v2  → GPU ON: CUDA (H100) / GPU OFF: CPU
-  └── Ollama VLM     → GPU ON: 大型モデル (32B+) / GPU OFF: 軽量モデル (7B)
-                        接続先: localhost:11434 (同一サーバー・ネットワーク遅延ゼロ)
+  ├── RT-DETR v2（デフォルト）/ v1（手動ON）→ GPU ON: CUDA (H100) / GPU OFF: CPU
+  └── Ollama VLM → keep_alive=300（5分間モデルをVRAMに保持・高速化）
+                   接続先: localhost:11434（同一サーバー・ネットワーク遅延ゼロ）
 ```
 
 ---
@@ -105,7 +104,7 @@ python3 download_models.py
 ### 6. OllamaでVLMモデルをダウンロード
 
 ```bash
-ollama pull qwen2.5vl:7b   # 軽量モデル
+ollama pull qwen2.5vl:7b   # 軽量モデル（推奨）
 ollama pull qwen2.5vl:32b  # 高精度モデル
 ```
 
@@ -121,8 +120,8 @@ sudo systemctl edit ollama --force
 [Service]
 Environment="OLLAMA_HOST=0.0.0.0"
 Environment="OLLAMA_ORIGINS=*"
-Environment="OLLAMA_KEEP_ALIVE=0"
 Environment="OLLAMA_NEW_ENGINE=true"
+Environment="LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu:/usr/local/lib/ollama"
 ```
 
 ```bash
@@ -130,8 +129,8 @@ sudo systemctl daemon-reload
 sudo systemctl restart ollama
 ```
 
-> **OLLAMA_KEEP_ALIVE=0**: モデル推論後にVRAMを即時解放。モデル切替時の競合を防ぎます。  
-> **OLLAMA_NEW_ENGINE=true**: 新エンジンを有効化し、CUDA H100を確実に利用します。
+> **OLLAMA_NEW_ENGINE=true**: 新エンジンを有効化し、CUDA H100を確実に利用します。  
+> **OLLAMA_KEEP_ALIVE はアプリ側で `keep_alive=300`（5分）を指定**しているため systemd への記載は不要です。
 
 ### 8. Streamlit systemdサービス登録（GPU サーバーで実行）
 
@@ -191,7 +190,7 @@ sudo systemctl restart nginx
 ```
 video-detection-demo/
 ├── app.py                  # メインアプリ
-├── run.sh                  # 起動スクリプト
+├── run.sh                  # 起動スクリプト（Mac開発用）
 ├── download_models.py      # RT-DETRモデルダウンロード
 ├── requirements.txt        # Pythonパッケージ一覧
 ├── .env.example            # 環境変数テンプレート（.envをコピーして作成）
@@ -210,7 +209,7 @@ video-detection-demo/
 
 ```env
 # ── APIキー ───────────────────────────────────────────────
-NVIDIA_API_KEY=nvapi-xxxx...      # NVIDIA NIM APIキー
+NVIDIA_API_KEY=nvapi-xxxx...      # NVIDIA NIM APIキー（NIM使用時のみ必要）
 HF_TOKEN=hf_xxxx...               # HuggingFaceトークン（任意）
 
 # ── ディレクトリ設定 ──────────────────────────────────────
@@ -228,29 +227,31 @@ DEFAULT_VIDEO_FOLDER=/home/ailab/videos
 
 ## GPU / CPU モード切り替え
 
-ヘッダー右上の **GPU トグルボタン1つ**で切り替えます。
+ヘッダー右上に **GPU トグル** と **START トグル** の2つがあります。
 
 | 操作 | 動作 |
 |---|---|
-| GPU トグル **ON** | GPUモードで自動START（CUDA H100 + 大型VLMモデル） |
-| GPU トグル **OFF** | CPUモードに切替えて自動再起動（軽量VLMモデル） |
-| 右上 **Stop** ボタン | 処理を停止 |
+| GPU トグル **ON** | CUDA H100モード（RT-DETR CUDA + 大型VLMモデル） |
+| GPU トグル **OFF** | CPUモード（RT-DETR CPU + 軽量VLMモデル） |
+| START トグル **ON** | 映像分析を開始 |
+| START トグル **OFF / Stop ボタン** | 分析を停止 |
 
 | モード | RT-DETR | Ollama VLM | 用途 |
 |---|---|---|---|
-| **⚡ GPU ON** | CUDA (H100) | 大型モデル (32B+) | 高精度・デモ用 |
+| **⚡ GPU ON** | CUDA (H100) | ビジョンモデル全般 | 高精度・デモ用 |
 | **💻 CPU** | CPU | 軽量モデル (7B) | 省リソース・確認用 |
+
+> **設定の保持**: GPUトグルを切り替えてもURL・モデル選択・スライダー設定はリセットされません。
 
 ---
 
-## LIVE FEED タブ（TV投影用）
+## SUMMARIZATION タブ
 
-**PERFORMANCE** タブの右隣に **LIVE FEED** タブを追加しました。
+Ollamaのローカルモデル（GPU上）またはNIM APIを使って分析ログを要約します。
 
-- YouTubeネイティブプレーヤーをフル幅（16:9）で埋め込み
-- 最大4K・1080p自動選択
-- **F11キー**でフルスクリーン → 42インチ以上のTV・プロジェクター投影対応
-- サイドバーでYouTube LiveのURLを接続済みの場合に自動で映像を表示
+- **Ollamaモデル**: NVIDIA_API_KEY不要。GPU上で高速に処理。全48モデルから選択可能。
+- **NIM APIモデル** (`[NIM]` 表記): NVIDIA_API_KEY が必要。クラウド処理。
+- LIVE DETECTIONで分析ログが蓄積された後に実行してください。
 
 ---
 
@@ -258,11 +259,11 @@ DEFAULT_VIDEO_FOLDER=/home/ailab/videos
 
 ### GPU Server（Ollama / localhost:11434）
 
-#### ビジョン対応モデル（映像分析に使用）
+#### ビジョン対応モデル（LIVE DETECTIONに使用・推奨）
 
 | モデル名（UI表示） | Ollama ID | 特徴 |
 |---|---|---|
-| Qwen2.5-VL 7B (GPU Server) | `qwen2.5vl:7b` | 軽量・高速 |
+| Qwen2.5-VL 7B (GPU Server) | `qwen2.5vl:7b` | 軽量・高速・**推奨** |
 | Qwen2.5-VL 32B (GPU Server) | `qwen2.5vl:32b` | 高精度 |
 | Qwen3-VL 8B (GPU Server) | `qwen3-vl:8b` | 最新世代・軽量 |
 | Qwen3-VL 32B (GPU Server) | `qwen3-vl:32b` | 最新世代・高精度 |
@@ -277,22 +278,11 @@ DEFAULT_VIDEO_FOLDER=/home/ailab/videos
 | GLM-4.7 Flash BF16 (GPU Server) | `glm-4.7-flash:bf16` | 中国語強化 |
 | GLM-4.7 Flash BF16 192K (GPU Server) | `glm-4.7-flash:bf16-192k` | 超長文コンテキスト |
 
-#### テキストモデル（映像分析には非推奨）
+#### テキストモデル（SUMMARIZATION用・LIVE DETECTIONには非推奨）
 
-| モデル名 | 特徴 |
-|---|---|
-| Qwen3.5 4B〜122B | 各サイズ対応 |
-| Qwen3 32B / 235B A22B | 超大規模MoE |
-| Llama3.1〜3.3 各種 | テキスト推論 |
-| GPT-OSS 20B〜120B | GPT互換 |
-| Nemotron 各種 | NVIDIA推論特化 |
-| Mistral Small 3.1/3.2 | 軽量・高速 |
-| Phi4 / Phi4 Mini | Microsoft最新 |
-| Command-A / Command-R+ | Cohere製 |
-| Cogito 32B | 推論特化 |
-| Aya Expanse 32B | 多言語特化 |
+Qwen3.5・Qwen3・Llama3.x・GPT-OSS・Nemotron・Mistral Small・Phi4・Command-A/R+・Cogito・Aya Expanse など全48モデル対応。
 
-> **注意:** テキスト専用モデルを映像分析に使用するとエラーが発生します。  
+> **注意:** テキスト専用モデルをLIVE DETECTIONで使用するとエラーが発生します。  
 > ビジョン対応モデルは名前に `VL`・`Vision`・`Gemma`・`GLM`・`Llama4` が含まれるものです。
 
 ### NVIDIA NIM API（クラウド）
@@ -321,19 +311,31 @@ DEFAULT_VIDEO_FOLDER=/home/ailab/videos
 
 ### 速度に関係するパラメータ（サイドバーで調整）
 
-| パラメータ | 役割 | 速くするには |
-|---|---|---|
-| **VLM Interval (s)** | 次フレームを送るまでの待機時間 | 推論時間に合わせて設定 |
-| **Max Tokens** | 1回の出力文字数上限 | **200〜300に下げる**（最も効果大） |
-| **Image Resize (%)** | VLMに送る画像サイズ | **50〜60%に下げる** |
+| パラメータ | デフォルト | 役割 | 速くするには |
+|---|---|---|---|
+| **VLM Interval (s)** | 5 | 分析間隔 | LATENCYの値に合わせる |
+| **Max Tokens** | 300 | 出力文字数上限 | 200に下げる |
+| **Image Resize (%)** | 80 | 表示サイズ（VLM送信は内部で50%固定） | 変更不要 |
+| **RT-DETR v1** | OFF | v1検出（v2と併用） | OFFのまま推奨 |
+| **RT-DETR v2** | ON | メイン検出エンジン | ONのまま |
+
+### 重要な仕組み
+
+```
+実際の分析間隔 = max(VLM Interval, 推論時間)
+```
+
+- **表示用画像**: Image Resize (%) の値で表示（画質維持）
+- **VLM送信画像**: 内部で50%に縮小して高速化（認識精度への影響は軽微）
+- **モデルのVRAM保持**: `keep_alive=300`（5分間）により2回目以降の推論が高速化
 
 ### 環境別推奨設定
 
 | パラメータ | ⚡ GPU モード | 💻 CPU モード |
 |---|---|---|
 | VLM Interval (s) | 3〜5 | 10〜15 |
-| Max Tokens | 600 | 200〜300 |
-| Image Resize (%) | 80〜100 | 50〜60 |
+| Max Tokens | 300 | 200 |
+| Image Resize (%) | 80 | 60 |
 
 ---
 
@@ -344,16 +346,18 @@ DEFAULT_VIDEO_FOLDER=/home/ailab/videos
 GPUサーバーのStreamlitが停止しています：
 
 ```bash
-ssh ailab@192.168.11.111  # video-ai-demoから
+# video-ai-demoからSSH
+ssh ailab@192.168.11.111
 sudo systemctl status streamlit-vit
 sudo systemctl restart streamlit-vit
 ```
 
-### OllamaがGPUを使っていない
+### OllamaがGPUを使っていない（推論が遅い）
 
 ```bash
 journalctl -u ollama -n 20 --no-pager | grep -i "cuda\|H100"
 # 正常: ggml_cuda_init: found 2 CUDA devices: NVIDIA H100 PCIe
+# 正常: load_backend: loaded CUDA backend from .../cuda_v12/libggml-cuda.so
 
 # CUDAバックエンドが見つからない場合は再インストール
 curl -fsSL https://ollama.com/install.sh | sh
@@ -368,6 +372,16 @@ sudo docker stop llm-jp-4-thinking-vllm-server
 sudo docker update --restart=no llm-jp-4-thinking-vllm-server
 ```
 
+### OllamaがVRAMをほぼ全て使っている
+
+前回の推論でモデルがVRAMに残っている場合：
+
+```bash
+sudo systemctl restart ollama
+sleep 5
+nvidia-smi | grep MiB  # 4MiBになればOK
+```
+
 ### YouTubeのボット判定エラー
 
 ```bash
@@ -379,6 +393,8 @@ scp cookies.txt ailab@10.71.129.9:/tmp/
 ssh ailab@10.71.129.9
 scp /tmp/cookies.txt ailab@192.168.11.111:/home/ailab/video-detection-demo/
 ```
+
+`cookies.txt` が存在する場合、アプリが自動的に認証に使用します。
 
 ---
 
@@ -413,8 +429,9 @@ sudo systemctl restart nginx
 - `data/` はGitに含まれません（生成ファイルを保護）
 - `cookies.txt` はGitに含まれません（認証情報を保護）
 - `certs/` はGitに含まれません（`run.sh` が自動生成）
-- Ollamaが起動していない場合はローカルVLMは使えません
-- テキスト専用モデルを映像分析モードで使用するとOllamaエラーが発生します
+- Ollamaが起動していない場合はローカルVLMは使えません（NIMモデルは引き続き使用可）
+- テキスト専用モデルをLIVE DETECTIONで使用するとOllamaエラーが発生します
+- 複数人が同時にSTARTすると推論速度が低下します
 
 ---
 
@@ -422,5 +439,5 @@ sudo systemctl restart nginx
 
 | キー | 取得場所 | 用途 |
 |---|---|---|
-| `NVIDIA_API_KEY` | https://build.nvidia.com | NIM VLMモデル・テキストモデル |
+| `NVIDIA_API_KEY` | https://build.nvidia.com | NIM VLMモデル・テキストモデル（任意） |
 | `HF_TOKEN`（任意） | https://huggingface.co/settings/tokens | HF無料モデル |
